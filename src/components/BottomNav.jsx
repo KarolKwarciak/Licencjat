@@ -4,36 +4,47 @@ export default function BottomNav({ activeTab, setActiveTab }) {
       
       <button
         onClick={() => setActiveTab('history')}
-        className={`p-2 rounded-2xl transition-all duration-300 flex items-center justify-center w-14 h-14 active:scale-95 ${activeTab === 'history' ? 'bg-blue-500/10 scale-110' : 'opacity-60 hover:opacity-100'}`}
+        className={`p-2 rounded-2xl transition-all duration-300 flex items-center justify-center w-12 h-12 active:scale-95 ${activeTab === 'history' ? 'bg-blue-500/10 scale-110' : 'opacity-60 hover:opacity-100'}`}
       >
-        <span className="text-2xl">📋</span>
+        <span className="text-xl">📋</span>
       </button>
 
-      <div className="w-px h-8 bg-gray-300/80 dark:bg-gray-700/80"></div>
+      <div className="w-px h-6 bg-gray-300/60 dark:bg-gray-700/60"></div>
+
+      <button
+        onClick={() => {
+          setActiveTab('exercises');
+        }}
+        className={`p-2 rounded-2xl transition-all duration-300 flex items-center justify-center w-12 h-12 active:scale-95 ${activeTab === 'exercises' ? 'bg-blue-500/10 scale-110' : 'opacity-60 hover:opacity-100'}`}
+      >
+        <span className="text-xl">🏋️‍♂️</span>
+      </button>
+
+      <div className="w-px h-6 bg-gray-300/60 dark:bg-gray-700/60"></div>
 
       <button
         onClick={() => setActiveTab('workout')}
-        className={`p-2 rounded-2xl transition-all duration-300 flex items-center justify-center w-14 h-14 active:scale-95 ${activeTab === 'workout' ? 'bg-blue-500/10 scale-110' : 'opacity-60 hover:opacity-100'}`}
+        className={`p-2 rounded-2xl transition-all duration-300 flex items-center justify-center w-12 h-12 active:scale-95 ${activeTab === 'workout' ? 'bg-blue-500/10 scale-110' : 'opacity-60 hover:opacity-100'}`}
       >
-        <span className="text-2xl">💪</span>
+        <span className="text-xl">💪</span>
       </button>
 
-      <div className="w-px h-8 bg-gray-300/80 dark:bg-gray-700/80"></div>
+      <div className="w-px h-6 bg-gray-300/60 dark:bg-gray-700/60"></div>
 
       <button
         onClick={() => setActiveTab('calendar')}
-        className={`p-2 rounded-2xl transition-all duration-300 flex items-center justify-center w-14 h-14 active:scale-95 ${activeTab === 'calendar' ? 'bg-blue-500/10 scale-110' : 'opacity-60 hover:opacity-100'}`}
+        className={`p-2 rounded-2xl transition-all duration-300 flex items-center justify-center w-12 h-12 active:scale-95 ${activeTab === 'calendar' ? 'bg-blue-500/10 scale-110' : 'opacity-60 hover:opacity-100'}`}
       >
-        <span className="text-2xl">📆</span>
+        <span className="text-xl">📆</span>
       </button>
 
-      <div className="w-px h-8 bg-gray-300/80 dark:bg-gray-700/80"></div>
+      <div className="w-px h-6 bg-gray-300/60 dark:bg-gray-700/60"></div>
 
       <button
         onClick={() => setActiveTab('profile')}
-        className={`p-2 rounded-2xl transition-all duration-300 flex items-center justify-center w-14 h-14 active:scale-95 ${activeTab === 'profile' ? 'bg-blue-500/10 scale-110' : 'opacity-60 hover:opacity-100'}`}
+        className={`p-2 rounded-2xl transition-all duration-300 flex items-center justify-center w-12 h-12 active:scale-95 ${activeTab === 'profile' ? 'bg-blue-500/10 scale-110' : 'opacity-60 hover:opacity-100'}`}
       >
-        <span className="text-2xl">👤</span>
+        <span className="text-xl">👤</span>
       </button>
 
     </nav>
