@@ -1,2 +1,20 @@
 @import "tailwindcss";
 @custom-variant dark (&:is(.dark *));
+
+@layer base {
+  body {
+    @apply bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 antialiased selection:bg-blue-500/30;
+  }
+  
+  /* Płynne przewijanie */
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  /* Wspólny styl dla kart, żeby nie pisać tego w każdym komponencie */
+  .card {
+    @apply bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm transition-all duration-300;
+  }
+}

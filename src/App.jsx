@@ -33,7 +33,7 @@ function App() {
   const [isDarkMode, setIsDarkMode] = useState(false)
 
   const allExercises = [...EXERCISES_DB, ...customExercises]
-  const allTemplates = [...customTemplates] // Tylko customowe szablony!
+  const allTemplates = [...customTemplates]
   const [selectedStatExercise, setSelectedStatExercise] = useState('1')
 
   useEffect(() => {
@@ -318,8 +318,24 @@ function App() {
               {exercise.sets.map((set, sIndex) => (
                 <div key={sIndex} className={`grid grid-cols-4 gap-2 mb-2 items-center p-1 rounded ${set.isCompleted ? 'bg-green-50 dark:bg-green-900/20' : ''}`}>
                   <div className="text-center font-bold text-gray-700 dark:text-gray-300">{sIndex + 1}</div>
-                  <input type="number" value={set.weight} onChange={(e) => updateSet(eIndex, sIndex, 'weight', e.target.value)} disabled={set.isCompleted} className={`rounded p-2 text-center w-full outline-none focus:ring-2 focus:ring-blue-400 ${set.isCompleted ? 'bg-transparent text-green-800 dark:text-green-400 font-bold' : 'bg-gray-100 dark:bg-gray-700 dark:text-white'}`} placeholder="0" />
-                  <input type="number" value={set.reps} onChange={(e) => updateSet(eIndex, sIndex, 'reps', e.target.value)} disabled={set.isCompleted} className={`rounded p-2 text-center w-full outline-none focus:ring-2 focus:ring-blue-400 ${set.isCompleted ? 'bg-transparent text-green-800 dark:text-green-400 font-bold' : 'bg-gray-100 dark:bg-gray-700 dark:text-white'}`} placeholder="0" />
+                  <input 
+                    type="text" 
+                    inputMode="decimal"
+                    value={set.weight} 
+                    onChange={(e) => updateSet(eIndex, sIndex, 'weight', e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.'))} 
+                    disabled={set.isCompleted} 
+                    className={`rounded p-2 text-center w-full outline-none focus:ring-2 focus:ring-blue-400 ${set.isCompleted ? 'bg-transparent text-green-800 dark:text-green-400 font-bold' : 'bg-gray-100 dark:bg-gray-700 dark:text-white'}`} 
+                    placeholder="0" 
+                  />
+                  <input 
+                    type="text" 
+                    inputMode="numeric"
+                    value={set.reps} 
+                    onChange={(e) => updateSet(eIndex, sIndex, 'reps', e.target.value.replace(/[^0-9]/g, ''))} 
+                    disabled={set.isCompleted} 
+                    className={`rounded p-2 text-center w-full outline-none focus:ring-2 focus:ring-blue-400 ${set.isCompleted ? 'bg-transparent text-green-800 dark:text-green-400 font-bold' : 'bg-gray-100 dark:bg-gray-700 dark:text-white'}`} 
+                    placeholder="0" 
+                  />
                   <button onClick={() => toggleSetComplete(eIndex, sIndex)} className={`rounded p-2 transition-colors ${set.isCompleted ? 'bg-green-500 dark:bg-green-600 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-500 dark:text-gray-300 hover:bg-green-100 dark:hover:bg-green-900/30'}`}>✓</button>
                 </div>
               ))}
