@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  base: '/Licencjat/',
+  base: './', // <--- KLUCZOWA ZMIANA, kropka i ukośnik!
   plugins: [
     tailwindcss(),
     react(),
@@ -17,17 +17,17 @@ export default defineConfig({
         theme_color: '#2563eb',
         background_color: '#ffffff',
         display: 'standalone',
-        scope: '/Licencjat/',
-        start_url: '/Licencjat/',
+        scope: './', // <--- usunięto /Licencjat/
+        start_url: './', // <--- usunięto /Licencjat/
         icons: [
           {
-            src: '/Licencjat/pwa-192x192.png',
+            src: 'pwa-192x192.png', // <--- usunięto /Licencjat/
             sizes: '192x192',
             type: 'image/png',
             purpose: 'any maskable'
           },
           {
-            src: '/Licencjat/pwa-512x512.png',
+            src: 'pwa-512x512.png', // <--- usunięto /Licencjat/
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any maskable'

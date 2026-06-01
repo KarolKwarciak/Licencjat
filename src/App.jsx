@@ -4,10 +4,15 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { EXERCISES_DB } from './data/exercises'
 import { supabase } from './supabaseClient'
 
+// POTĘŻNY SYSTEMOWY BUDZIK OD CAPACITORA
+import { LocalNotifications } from '@capacitor/local-notifications'
+
+// Importujemy nasze wydzielone komponenty
 import BottomNav from './components/BottomNav'
 import RestTimer from './components/RestTimer'
 import Auth from './components/Auth'
 
+// Importujemy widoki z nowego folderu 'views'
 import HistoryTabRaw from './views/HistoryTab'
 import ExercisesTabRaw from './views/ExercisesTab'
 import WorkoutTab from './views/WorkoutTab' 
@@ -27,6 +32,7 @@ function App() {
   const [loadingData, setLoadingData] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   
+  // --- SYSTEM TOASTÓW ---
   const [toast, setToast] = useState(null); 
   const showToast = (message, type = 'info') => setToast({ message, type });
 
@@ -37,11 +43,13 @@ function App() {
     }
   }, [toast])
 
+  // --- SYSTEM MODALI ---
   const [confirmModal, setConfirmModal] = useState(null);
   const showConfirmationModal = (message, onConfirm, confirmText = 'Zatwierdź', cancelText = 'Anuluj', onCancel = null) => {
     setConfirmModal({ message, onConfirm, confirmText, cancelText, onCancel });
   }
 
+  // --- STANY APLIKACJI Z AUTO-SAVEM W LOCALSTORAGE ---
   const [isWorkoutActive, setIsWorkoutActive] = useState(() => JSON.parse(localStorage.getItem('fitApp_isWorkoutActive')) || false)
   const [currentWorkout, setCurrentWorkout] = useState(() => JSON.parse(localStorage.getItem('fitApp_currentWorkout')) || [])
   const [workoutStartTime, setWorkoutStartTime] = useState(() => JSON.parse(localStorage.getItem('fitApp_workoutStartTime')) || null)
@@ -55,6 +63,7 @@ function App() {
   const [defaultRestTime, setDefaultRestTime] = useState(180) 
   const [isInlineTimerVisible, setIsInlineTimerVisible] = useState(true)
 
+  // EFEKT ZAPISUJĄCY TRENING W TLE
   useEffect(() => {
     localStorage.setItem('fitApp_isWorkoutActive', JSON.stringify(isWorkoutActive));
     localStorage.setItem('fitApp_currentWorkout', JSON.stringify(currentWorkout));
@@ -194,30 +203,7 @@ function App() {
     if (savedTheme === 'dark') { setIsDarkMode(true); document.documentElement.classList.add('dark'); }
   }, [])
 
-  // --- ZABEZPIECZENIE: Zablokuj usypianie ekranu podczas treningu! ---
-  useEffect(() => {
-    let wakeLockObj = null;
-    const requestWakeLock = async () => {
-      if (isWorkoutActive && 'wakeLock' in navigator && document.visibilityState === 'visible') {
-        try {
-          wakeLockObj = await navigator.wakeLock.request('screen');
-        } catch (err) {
-          console.log("Wake Lock nieudany:", err);
-        }
-      }
-    };
-
-    requestWakeLock();
-    const handleVisibilityChange = () => { if (document.visibilityState === 'visible') requestWakeLock(); };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (wakeLockObj !== null) wakeLockObj.release().catch(() => {});
-    };
-  }, [isWorkoutActive]);
-
-  // --- STOPER OPARTY O TIMESTAMPY Z POWIADOMIENIAMI ---
+  // --- STOPER OPARTY O TIMESTAMPY (Z KONTROLĄ SYSTEMU OPERACYJNEGO) ---
   useEffect(() => {
     let interval = null;
     if (timerActive && timerTarget) {
@@ -230,15 +216,6 @@ function App() {
           setTimeLeft(0);
           setTimerTarget(null);
           clearInterval(interval);
-          if ('vibrate' in navigator) navigator.vibrate([200, 100, 200, 100, 400]);
-          
-          // --- POWIADOMIENIE SYSTEMOWE PO ZAKOŃCZENIU PRZERWY ---
-          if ("Notification" in window && Notification.permission === "granted") {
-            new Notification("Koniec przerwy! 🚨", {
-              body: "Czas na kolejną serię. Wracaj do roboty!",
-              vibrate: [200, 100, 200, 100, 400]
-            });
-          }
         }
       }, 500);
     }
@@ -251,11 +228,34 @@ function App() {
     return () => clearInterval(interval)
   }, [isWorkoutActive, workoutStartTime])
 
-  // --- FUNKCJA ZARZĄDZAJĄCA PRZYCISKAMI +/- W STOPERZE ---
-  const adjustTimer = (amountInSeconds) => {
+  // --- PANCERNY MODYFIKATOR CZASU (+/- 30s) SYNCHRONIZOWANY Z SYSTEMEM TELEFONU ---
+  const adjustTimer = async (amountInSeconds) => {
     if (timerTarget) {
-      setTimerTarget(prev => prev + amountInSeconds * 1000);
+      const newTarget = timerTarget + amountInSeconds * 1000;
+      setTimerTarget(newTarget);
       setTimeLeft(prev => prev + amountInSeconds);
+
+      // Aktualizujemy systemowy alarm w telefonie na nowy czas
+      try {
+        await LocalNotifications.cancel({ notifications: [{ id: 777 }] });
+        if (newTarget > Date.now()) {
+          await LocalNotifications.schedule({
+            notifications: [
+              {
+                title: "Koniec przerwy! 🚨",
+                body: "Czas na kolejną serię. Wracaj do treningu!",
+                id: 777,
+                schedule: { at: new Date(newTarget) },
+                sound: null,
+                actionTypeId: "",
+                extra: null
+              }
+            ]
+          });
+        }
+      } catch (e) {
+        console.log("Modyfikacja powiadomienia poza aplikacją natywną");
+      }
     }
   };
 
@@ -334,21 +334,15 @@ function App() {
     return `${m}:${s < 10 ? '0' : ''}${s}`
   }
 
-  // --- PROŚBA O ZGODĘ NA POWIADOMIENIA PUSH ---
-  const requestNotificationPermission = () => {
-    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
-      Notification.requestPermission();
-    }
-  };
-
   const startWorkout = () => {
-    requestNotificationPermission(); // Prosi o zgodę przy rozpoczęciu pierwszego treningu
+    // Żądamy zgody na systemowe notyfikacje w telefonie przy starcie
+    try { LocalNotifications.requestPermissions(); } catch(e){}
     setEditingWorkoutId(null); setIsWorkoutActive(true); setTimerSource(null); 
     setTimerTarget(null); setTimerActive(false); setWorkoutStartTime(Date.now()); setElapsedTime(0);
   }
 
   const startWorkoutFromTemplate = (template) => {
-    requestNotificationPermission();
+    try { LocalNotifications.requestPermissions(); } catch(e){}
     setEditingWorkoutId(null); setCurrentWorkout(JSON.parse(JSON.stringify(template.exercises))); 
     setIsWorkoutActive(true); setTimerSource(null); setTimerTarget(null); setTimerActive(false); 
     setWorkoutStartTime(Date.now()); setElapsedTime(0);
@@ -356,13 +350,14 @@ function App() {
 
   const clearAutoSave = () => {
     ['fitApp_isWorkoutActive', 'fitApp_currentWorkout', 'fitApp_workoutStartTime', 'fitApp_elapsedTime', 'fitApp_editingWorkoutId', 'fitApp_timerActive', 'fitApp_timerTarget', 'fitApp_timerSource'].forEach(k => localStorage.removeItem(k));
-  }
+  };
 
   const cancelWorkout = () => {
     const msg = editingWorkoutId ? 'Czy chcesz porzucić edycję tego treningu?' : 'Czy na pewno chcesz anulować trening? Postęp zostanie utracony.';
     showConfirmationModal(msg, () => {
       setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setTimerTarget(null);
       setEditingWorkoutId(null); setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0);
+      try { LocalNotifications.cancel({ notifications: [{ id: 777 }] }); } catch(e){}
       clearAutoSave();
     });
   }
@@ -459,6 +454,7 @@ function App() {
 
     setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setTimerTarget(null);
     setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0); setActiveSetMenu(null);
+    try { LocalNotifications.cancel({ notifications: [{ id: 777 }] }); } catch(e){}
     clearAutoSave();
 
     if (uid && finalWorkoutObj) {
@@ -496,7 +492,7 @@ function App() {
   const removeExerciseFromWorkout = (indexToRemove) => {
     showConfirmationModal('Czy usunąć to ćwiczenie z treningu?', () => {
       setCurrentWorkout(currentWorkout.filter((_, idx) => idx !== indexToRemove))
-      if (timerSource?.exercise === indexToRemove) { setTimerActive(false); setTimerTarget(null); setTimerSource(null); }
+      if (timerSource?.exercise === indexToRemove) { setTimerActive(false); setTimerTarget(null); setTimerSource(null); try { LocalNotifications.cancel({ notifications: [{ id: 777 }] }); } catch(e){} }
       else if (timerSource?.exercise > indexToRemove) setTimerSource({ exercise: timerSource.exercise - 1, set: timerSource.set })
     });
   }
@@ -570,7 +566,8 @@ function App() {
     const newWorkout = [...currentWorkout]; newWorkout[eIndex].sets[sIndex][field] = value; setCurrentWorkout(newWorkout);
   }
 
-  const toggleSetComplete = (eIndex, sIndex) => {
+  // --- ODPALANIE SYSTEMOWEGO LICZNIKA PRZY ODZNACZANIU SERII ---
+  const toggleSetComplete = async (eIndex, sIndex) => {
     const newWorkout = [...currentWorkout]; const isNowCompleted = !newWorkout[eIndex].sets[sIndex].isCompleted;
     newWorkout[eIndex].sets[sIndex].isCompleted = isNowCompleted; setCurrentWorkout(newWorkout);
     
@@ -579,13 +576,35 @@ function App() {
       const isWarmup = setType === 'warm-up' || setType === 'W'; 
       const restTimeSeconds = isWarmup ? 60 : defaultRestTime;
 
-      setTimerTarget(Date.now() + restTimeSeconds * 1000); 
+      const targetTimestamp = Date.now() + restTimeSeconds * 1000;
+      setTimerTarget(targetTimestamp); 
       setTimeLeft(restTimeSeconds); 
       setTimerActive(true); 
       setTimerSource({ exercise: eIndex, set: sIndex }); 
+
+      // REJESTRACJA SYSTEMOWEGO POWIADOMIENIA W TELEFONIE (ZABLOKOWANY EKRAN)
+      try {
+        await LocalNotifications.cancel({ notifications: [{ id: 777 }] });
+        await LocalNotifications.schedule({
+          notifications: [
+            {
+              title: "Koniec przerwy! 🚨",
+              body: "Czas na kolejną serię, wracaj do treningu!",
+              id: 777,
+              schedule: { at: new Date(targetTimestamp) },
+              sound: null,
+              actionTypeId: "",
+              extra: null
+            }
+          ]
+        });
+      } catch (err) {
+        console.log("Rejestracja powiadomienia poza aplikacją natywną");
+      }
     } else { 
       if (timerSource?.exercise === eIndex && timerSource?.set === sIndex) { 
         setTimerActive(false); setTimerTarget(null); setTimerSource(null); 
+        try { await LocalNotifications.cancel({ notifications: [{ id: 777 }] }); } catch(e){}
       } 
     }
   }
@@ -1083,79 +1102,6 @@ function App() {
       </main>
 
       <AnimatePresence>
-        {showMeasurementHistory && (
-          <motion.div 
-            initial={{ opacity: 0, y: '100%' }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: '100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="absolute inset-0 z-[110] bg-gray-50 dark:bg-gray-900 flex flex-col transition-colors duration-300"
-          >
-            <header className="sticky top-0 z-40 bg-white dark:bg-gray-800 shadow-md px-4 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center shrink-0">
-              <h2 className="text-xl font-black dark:text-white tracking-tight">Historia pomiarów</h2>
-              <button onClick={() => setShowMeasurementHistory(false)} className="text-blue-500 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg text-sm cursor-pointer">Zamknij</button>
-            </header>
-            <div className="flex-1 overflow-y-auto p-4 space-y-5 pb-10">
-              {['weight', 'waist', 'biceps'].map(metric => {
-                const label = metric === 'weight' ? 'Waga (kg)' : metric === 'waist' ? 'Pas (cm)' : 'Biceps (cm)';
-                const color = metric === 'weight' ? '#2563eb' : metric === 'waist' ? '#16a34a' : '#dc2626';
-                const mData = [...measurements].reverse().filter(m => m[metric]).map((m, index) => ({ id: index, date: m.date.slice(0, 5), fullDate: m.date, value: parseFloat(m[metric].replace(',','.')) }));
-                if (mData.length === 0) return null;
-                return (
-                  <div key={metric} className="bg-white dark:bg-gray-800 p-5 rounded-3xl shadow-lg border border-gray-200 dark:border-gray-700">
-                    <h3 className="font-extrabold text-gray-800 dark:text-gray-100 mb-5 text-sm uppercase tracking-widest">{label}</h3>
-                    <div className="h-48 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={mData}>
-                          <defs><linearGradient id={`color${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={color} stopOpacity={0.5}/><stop offset="95%" stopColor={color} stopOpacity={0}/></linearGradient></defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#374151' : '#f3f4f6'} />
-                          <XAxis dataKey="id" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? '#9ca3af' : '#9ca3af', fontWeight: 'bold' }} tickFormatter={(id) => mData.find(d => d.id === id)?.date || ''} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? '#9ca3af' : '#9ca3af', fontWeight: 'bold' }} width={30} domain={['dataMin - 2', 'dataMax + 2']} />
-                          <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: isDarkMode ? '#1f2937' : '#ffffff', color: isDarkMode ? '#f3f4f6' : '#374151', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)' }} labelStyle={{ fontWeight: '900', marginBottom: '4px', textTransform: 'uppercase', fontSize: '10px', color: '#9ca3af', letterSpacing: '0.05em' }} labelFormatter={(id) => mData.find(d => d.id === id)?.fullDate || ''} formatter={(value) => [`${value}`, label.split(' ')[0]]} />
-                          <Area type="monotone" dataKey="value" stroke={color} strokeWidth={4} fillOpacity={1} fill={`url(#color${metric})`} dot={{ r: 5, fill: color, stroke: isDarkMode ? '#1f2937' : '#fff', strokeWidth: 3 }} activeDot={{ r: 8, fill: color, stroke: isDarkMode ? '#1f2937' : '#fff', strokeWidth: 3 }} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showMeasurementModal && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[120] bg-gray-50/90 dark:bg-gray-900/90 backdrop-blur-md flex flex-col justify-center items-center p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              transition={{ type: 'spring', bounce: 0.5 }}
-              className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 w-full max-w-sm flex flex-col gap-5"
-            >
-              <div className="flex justify-between items-center mb-1 border-b border-gray-100 dark:border-gray-700 pb-3">
-                <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">Nowy pomiar</h2>
-                <button onClick={() => setShowMeasurementModal(false)} className="text-gray-400 hover:text-red-500 font-bold text-xl px-2 cursor-pointer">✕</button>
-              </div>
-              <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Waga (kg)</label><input type="text" inputMode="decimal" value={measForm.weight} onChange={e => setMeasForm({...measForm, weight: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 82.5" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
-              <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Obwód pasa (cm)</label><input type="text" inputMode="decimal" value={measForm.waist} onChange={e => setMeasForm({...measForm, waist: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 86" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
-              <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Obwód bicepsa (cm)</label><input type="text" inputMode="decimal" value={measForm.biceps} onChange={e => setMeasForm({...measForm, biceps: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 38.5" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
-              
-              <button disabled={isSaving} onClick={handleSaveMeasurement} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all mt-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-                {isSaving ? 'Zapisywanie... ⏳' : 'Zapisz pomiar'}
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
         {shouldShowSmartWidget && (
           <motion.div 
             initial={{ y: 150, opacity: 0 }}
@@ -1165,7 +1111,6 @@ function App() {
             onClick={() => {
               if (activeTab !== 'workout') setActiveTab('workout');
             }}
-            /* UWAGA: TUTAJ WIDGET ZMIENIONY NA FIXED I ZACENTROWANY - NIE BĘDZIE SIĘ ROZCIĄGAŁ! */
             className="fixed bottom-20 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-[calc(28rem-2rem)] z-[90] bg-blue-600 dark:bg-blue-700 rounded-2xl p-4 shadow-[0_10px_25px_rgba(37,99,235,0.4)] flex items-center justify-between cursor-pointer border border-blue-400 dark:border-blue-500 overflow-hidden"
           >
             <div className="absolute inset-0 bg-white/10 w-1/3 skew-x-12 -translate-x-full animate-[shimmer_2s_infinite]"></div>
