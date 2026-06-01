@@ -4,12 +4,12 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  base: '/Licencjat/',
   plugins: [
     tailwindcss(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      // To mówi Vite: "Bezwzględnie weź te pliki z folderu public!"
       includeAssets: ['pwa-192x192.png', 'pwa-512x512.png'], 
       manifest: {
         name: 'Fit App',
@@ -17,16 +17,20 @@ export default defineConfig({
         theme_color: '#2563eb',
         background_color: '#ffffff',
         display: 'standalone',
+        scope: '/Licencjat/',
+        start_url: '/Licencjat/',
         icons: [
           {
-            src: '/pwa-192x192.png', // Ukośnik jest tu obowiązkowy
+            src: '/Licencjat/pwa-192x192.png',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any maskable'
           },
           {
-            src: '/pwa-512x512.png', // Ukośnik jest tu obowiązkowy
+            src: '/Licencjat/pwa-512x512.png',
             sizes: '512x512',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any maskable'
           }
         ]
       }

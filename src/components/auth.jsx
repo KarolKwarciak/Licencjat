@@ -1,139 +1,127 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 
 export default function Auth() {
   const [loading, setLoading] = useState(false)
-  const [isRegister, setIsRegister] = useState(false)
-  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [message, setMessage] = useState({ text: '', type: '' })
+  const [isLogin, setIsLogin] = useState(true)
+  const [rememberMe, setRememberMe] = useState(true)
+  const [errorMsg, setErrorMsg] = useState(null)
+
+  // Pobieranie zapamiętanych danych przy starcie
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('fitAppSavedEmail')
+    const savedPassword = localStorage.getItem('fitAppSavedPassword')
+    if (savedEmail && savedPassword) {
+      setEmail(savedEmail)
+      setPassword(savedPassword)
+      setRememberMe(true)
+    }
+  }, [])
 
   const handleAuth = async (e) => {
     e.preventDefault()
     setLoading(true)
-    setMessage({ text: '', type: '' })
+    setErrorMsg(null)
 
-    if (!email.trim() || !password.trim() || (isRegister && !username.trim())) {
-      setMessage({ text: 'Wypełnij wszystkie pola!', type: 'error' })
-      setLoading(false)
-      return
+    // Zapamiętywanie usera i hasła
+    if (rememberMe) {
+      localStorage.setItem('fitAppSavedEmail', email)
+      localStorage.setItem('fitAppSavedPassword', password)
+    } else {
+      localStorage.removeItem('fitAppSavedEmail')
+      localStorage.removeItem('fitAppSavedPassword')
     }
 
     try {
-      if (isRegister) {
-        // Rejestracja z przekazaniem nazwy użytkownika w metadanych
-        const { error } = await supabase.auth.signUp({ 
-          email, 
-          password,
-          options: {
-            data: {
-              username: username.trim()
-            }
-          }
-        })
-        if (error) throw error
-        setMessage({ text: 'Rejestracja pomyślna! Sprawdź maila, aby potwierdzić konto.', type: 'success' })
-      } else {
-        // Logowanie (wymaga tylko maila i hasła)
+      if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
+      } else {
+        const { error } = await supabase.auth.signUp({ email, password })
+        if (error) throw error
+        alert('Rejestracja pomyślna! W celu pełnej aktywacji sprawdź swoją skrzynkę email.')
       }
     } catch (error) {
-      setMessage({ text: error.localizedDescription || error.message, type: 'error' })
+      setErrorMsg(error.error_description || error.message)
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="max-w-md mx-auto h-[100dvh] bg-gray-50 dark:bg-gray-950 flex flex-col justify-center p-6 font-sans transition-colors duration-300">
-      <div className="bg-white dark:bg-gray-900 p-6 rounded-3xl shadow-xl border border-gray-200 dark:border-gray-800 flex flex-col gap-6">
+    <div className="max-w-md mx-auto h-[100dvh] bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-6 font-sans transition-colors duration-300 relative overflow-hidden">
+      
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
+        <div className="absolute -top-20 -right-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
+        <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl"></div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 w-full relative z-10 animate-fade-in-up">
         
-        {/* LOGO / NAGŁÓWEK */}
-        <div className="text-center">
-          <span className="text-4xl">💪</span>
-          <h2 className="text-2xl font-black text-gray-900 dark:text-white mt-2 tracking-tight">
-            {isRegister ? 'Stwórz konto' : 'Witaj w FitApp'}
-          </h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-            {isRegister ? 'Zabezpiecz swoje treningi w chmurze' : 'Zaloguj się, aby synchronizować progres'}
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl shadow-lg mx-auto flex items-center justify-center mb-4 transform -rotate-6">
+            <span className="text-3xl">💪</span>
+          </div>
+          <h1 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">FitApp</h1>
+          <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1">
+            {isLogin ? 'Zaloguj się, aby kontynuować' : 'Zbuduj swoją formę z nami'}
           </p>
         </div>
 
-        {/* KOMUNIKATY BŁĘDÓW / SUKCESÓW */}
-        {message.text && (
-          <div className={`p-3 rounded-xl text-xs font-bold text-center border ${
-            message.type === 'error' 
-              ? 'bg-red-50 border-red-200 text-red-600 dark:bg-red-950/20 dark:border-red-900/50 dark:text-red-400' 
-              : 'bg-green-50 border-green-200 text-green-600 dark:bg-green-950/20 dark:border-green-900/50 dark:text-green-400'
-          }`}>
-            {message.text}
+        {errorMsg && (
+          <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-xs font-bold p-3 rounded-xl mb-4 text-center">
+            {errorMsg}
           </div>
         )}
 
-        {/* FORMULARZ */}
         <form onSubmit={handleAuth} className="flex flex-col gap-4">
-          
-          {/* POLE NAZWY UŻYTKOWNIKA (TYLKO REJESTRACJA) */}
-          {isRegister && (
-            <div>
-              <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1">Nazwa użytkownika</label>
-              <input 
-                type="text" 
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Twój nick"
-                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all"
-              />
-            </div>
-          )}
-
           <div>
-            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1">Adres E-mail</label>
-            <input 
-              type="email" 
+            <label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5 ml-1">Email</label>
+            <input
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="twoj.email@gmail.com"
-              className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all"
+              className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-medium transition-all shadow-inner"
+              placeholder="twoj@email.com"
+              required
             />
           </div>
-
           <div>
-            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1">Hasło</label>
-            <input 
-              type="password" 
+            <label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5 ml-1">Hasło</label>
+            <input
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-medium transition-all shadow-inner"
               placeholder="••••••••"
-              className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all"
+              required
             />
           </div>
 
-          <button 
+          <div className="flex items-center mt-1 ml-1 cursor-pointer w-max" onClick={() => setRememberMe(!rememberMe)}>
+            <div className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors ${rememberMe ? 'bg-blue-600 border-blue-600' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'}`}>
+              {rememberMe && <span className="text-white text-xs font-black">✓</span>}
+            </div>
+            <span className="ml-2 text-xs font-bold text-gray-600 dark:text-gray-400 select-none">Nie wylogowuj mnie (zapamiętaj)</span>
+          </div>
+
+          <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-md active:scale-95 transition-all cursor-pointer text-sm mt-2 flex justify-center items-center gap-2"
+            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black py-4 rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:-translate-y-0.5 active:scale-95 transition-all mt-4 disabled:opacity-70 cursor-pointer"
           >
-            {loading ? (
-              <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-            ) : (
-              isRegister ? 'Zarejestruj się' : 'Zaloguj się'
-            )}
+            {loading ? 'Przetwarzanie...' : (isLogin ? 'Zaloguj się' : 'Stwórz konto')}
           </button>
         </form>
 
-        {/* PRZEŁĄCZNIK WIDOKU */}
-        <div className="text-center">
-          <button 
-            onClick={() => {
-              setIsRegister(!isRegister)
-              setMessage({ text: '', type: '' })
-            }}
-            className="text-xs text-blue-500 dark:text-blue-400 font-bold hover:underline cursor-pointer"
+        <div className="mt-6 text-center">
+          <button
+            onClick={() => setIsLogin(!isLogin)}
+            className="text-xs font-bold text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
           >
-            {isRegister ? 'Masz już konto? Zaloguj się' : 'Nie masz konta? Zarejestruj się za darmo'}
+            {isLogin ? 'Nie masz konta? Zarejestruj się' : 'Masz już konto? Zaloguj się'}
           </button>
         </div>
 
