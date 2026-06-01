@@ -109,7 +109,6 @@ function App() {
   const [isModalFilterOpen, setIsModalFilterOpen] = useState(false)
   const [isCreateExFilterOpen, setIsCreateExFilterOpen] = useState(false)
 
-  // NAPRAWA BŁĘDU: Zdefiniowanie allTemplates z powrotem!
   const allTemplates = [...customTemplates]
 
   // --- EFEKTY POBIERANIA DANYCH I SESJI ---
@@ -133,7 +132,7 @@ function App() {
     }
   }, [session?.user?.id])
 
-  // POBIERANIE Z CHMURY
+  // POBIERANIE Z CHMURY + PANCERNY AUTO-SYNC
   useEffect(() => {
     if (!session?.user?.id) return;
     const uid = session.user.id;
@@ -141,9 +140,30 @@ function App() {
     const fetchCloudData = async () => {
       setLoadingData(true);
       try {
+        // KROK 1: Czytamy co mamy na telefonie
+        const localHistoryStr = localStorage.getItem(`fitAppHistory_${uid}`);
+        const localHistory = localHistoryStr ? JSON.parse(localHistoryStr) : [];
+
+        // KROK 2: Pobieramy historię z chmury
         const { data: cloudWorkouts, error: wError } = await supabase.from('workouts').select('*').order('id', { ascending: false });
         if (wError) throw wError;
+
         if (cloudWorkouts) {
+          // KROK 3: Szukamy niezsynchronizowanych treningów (w telefonie są, w chmurze brak)
+          const cloudIds = new Set(cloudWorkouts.map(w => String(w.id)));
+          const unsyncedWorkouts = localHistory.filter(w => !cloudIds.has(String(w.id)));
+
+          // KROK 4: Wypychamy je do chmury (Auto-Sync)
+          if (unsyncedWorkouts.length > 0) {
+            const { error: syncError } = await supabase.from('workouts').upsert(unsyncedWorkouts);
+            if (!syncError) {
+              showToast(`Zsynchronizowano ${unsyncedWorkouts.length} trening(i) z chmurą! ☁️`, "success");
+              // Dodajemy je wizualnie do załadowanej tablicy
+              cloudWorkouts.unshift(...unsyncedWorkouts);
+              cloudWorkouts.sort((a, b) => b.id - a.id);
+            }
+          }
+
           setWorkoutHistory(cloudWorkouts);
           localStorage.setItem(`fitAppHistory_${uid}`, JSON.stringify(cloudWorkouts));
         }
@@ -169,6 +189,7 @@ function App() {
         }
       } catch (err) {
         console.error("Błąd sieci:", err);
+        // Fallback w przypadku absolutnego braku neta - ładuje dane z pamięci
         const savedHistory = localStorage.getItem(`fitAppHistory_${uid}`)
         if (savedHistory) setWorkoutHistory(JSON.parse(savedHistory))
         const savedTemplates = localStorage.getItem(`fitAppTemplates_${uid}`)
@@ -235,7 +256,7 @@ function App() {
             id: ex.id || `recovered-${Date.now()}-${Math.random()}`,
             name: ex.name,
             target: ex.target || 'Inne',
-            description: ex.description || 'Odzyskane z historii Twoich treningów.'
+            description: 'Odzyskane z historii Twoich treningów.'
           });
           existingNames.add(exName);
         }
@@ -418,7 +439,7 @@ function App() {
         if (error) showToast(`Zapisano lokalnie. Błąd chmury: ${error.message}`, "error");
         else showToast("Trening potężnie zapisany w chmurze! 🚀", "success");
       } catch(e) {
-        showToast("Brak internetu. Trening zapisany bezpiecznie w telefonie 📴", "info");
+        showToast("Brak internetu. Trening zapisany w pamięci (zsynchronizuje się automatycznie!) 📴", "info");
       } finally {
         setIsSaving(false);
       }
