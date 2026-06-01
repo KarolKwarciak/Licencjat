@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import RestTimer from '../components/RestTimer'
 
 export default function WorkoutTab({
@@ -33,11 +33,39 @@ export default function WorkoutTab({
   moveSet,
   deleteSet,
   addSetToTemplate,
-  showConfirmationModal
+  showConfirmationModal,
+  moveExercise,
+  setIsInlineTimerVisible,
+  // Z FAZY 3/4: Funkcje do obsługi kliknięcia w tytuł
+  setSelectedExerciseDetail,
+  setExerciseSubTab,
+  setActiveTab
 }) {
+
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    if (!timerActive || !setIsInlineTimerVisible) {
+      if (setIsInlineTimerVisible) setIsInlineTimerVisible(true);
+      return;
+    }
+    
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsInlineTimerVisible(entry.isIntersecting);
+      },
+      { threshold: 0.1, rootMargin: '0px' } 
+    );
+
+    if (timerRef.current) {
+      observer.observe(timerRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [timerActive, timerSource, setIsInlineTimerVisible]);
+
   return (
     <>
-      {/* --- EKRAN 1: LISTA SZABLONÓW --- */}
       {!isWorkoutActive && !isCreatingTemplate && (
         <div className="flex flex-col gap-4 animate-fade-in-up">
           <button onClick={startWorkout} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black py-4 rounded-2xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all cursor-pointer">Rozpocznij pusty trening</button>
@@ -79,7 +107,6 @@ export default function WorkoutTab({
         </div>
       )}
 
-      {/* --- EKRAN 2: KREATOR SZABLONU --- */}
       {isCreatingTemplate && (
         <div className="flex flex-col gap-5 animate-fade-in-up">
           <div className="bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-800/90 p-5 rounded-3xl shadow-lg border border-gray-200 dark:border-gray-700">
@@ -133,7 +160,6 @@ export default function WorkoutTab({
         </div>
       )}
 
-      {/* --- EKRAN 3: AKTYWNY TRENING --- */}
       {isWorkoutActive && (
         <div className="flex flex-col gap-5 animate-fade-in-up">
           {currentWorkout.map((exercise, eIndex) => {
@@ -145,8 +171,43 @@ export default function WorkoutTab({
               <div key={eIndex} className="bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-800/90 p-4 pb-6 rounded-3xl shadow-lg border border-gray-200 dark:border-gray-700 relative overflow-hidden">
                 <div className="absolute -left-10 -top-10 w-40 h-40 bg-blue-500/5 dark:bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
                 <div className="flex justify-between items-start mb-5 relative z-10 px-1 pt-1">
-                  <h2 className="font-extrabold text-gray-900 dark:text-white text-xl pr-4 tracking-tight">{exercise.name}</h2>
-                  <button onClick={() => removeExerciseFromWorkout(eIndex)} className="text-gray-400 hover:text-red-500 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 hover:bg-red-50 dark:hover:bg-red-900/30 hover:border-red-200 dark:hover:border-red-800 px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all shadow-sm cursor-pointer">Usuń</button>
+                  
+                  {/* NOWOŚĆ: KLIKALNY TYTUŁ ĆWICZENIA (przenosi do Historii w bazie) */}
+                  <h2 
+                    className="font-extrabold text-blue-600 dark:text-blue-400 text-xl pr-2 tracking-tight flex-1 cursor-pointer hover:underline flex items-center gap-1.5"
+                    onClick={() => {
+                      setSelectedExerciseDetail(exercise);
+                      setExerciseSubTab('historia');
+                      setActiveTab('exercises');
+                    }}
+                    title="Kliknij, aby zobaczyć historię ćwiczenia"
+                  >
+                    {exercise.name} <span className="text-sm opacity-60">📋</span>
+                  </h2>
+                  
+                  <div className="flex items-center gap-1 shrink-0 bg-gray-100 dark:bg-gray-900 rounded-xl p-1 border border-gray-200 dark:border-gray-700">
+                    <button 
+                      onClick={() => moveExercise && moveExercise(eIndex, -1)} 
+                      disabled={eIndex === 0} 
+                      className="w-7 h-7 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-gray-800 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      ↑
+                    </button>
+                    <button 
+                      onClick={() => moveExercise && moveExercise(eIndex, 1)} 
+                      disabled={eIndex === currentWorkout.length - 1} 
+                      className="w-7 h-7 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-gray-800 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      ↓
+                    </button>
+                    <div className="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-0.5"></div>
+                    <button 
+                      onClick={() => removeExerciseFromWorkout(eIndex)} 
+                      className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-red-500 dark:text-gray-400 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="grid grid-cols-[8%_25%_18%_18%_16%_12%] gap-1 mb-3 text-[9px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest text-center px-2 py-1.5 bg-gray-100 dark:bg-gray-900/50 rounded-xl relative z-10">
@@ -169,6 +230,19 @@ export default function WorkoutTab({
                           <button onClick={() => toggleSetComplete(eIndex, sIndex)} className={`w-full flex items-center justify-center h-8 rounded-xl text-sm transition-all shadow-sm border cursor-pointer ${set.isCompleted ? 'bg-green-500 text-white border-green-600 shadow-green-500/30' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>✓</button>
                         </div>
 
+                        {(set.note || (activeSetMenu?.eIndex === eIndex && activeSetMenu?.sIndex === sIndex)) && (
+                          <div className="pl-10 pr-2 pt-1 pb-1 animate-fade-in-up">
+                            <input 
+                              type="text" 
+                              placeholder="Notatka do serii (opcjonalnie)..." 
+                              value={set.note || ''} 
+                              onChange={(e) => updateSet(eIndex, sIndex, 'note', e.target.value)}
+                              disabled={set.isCompleted}
+                              className="w-full text-[10px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-2 outline-none focus:border-blue-400 text-gray-700 dark:text-gray-300 shadow-inner italic"
+                            />
+                          </div>
+                        )}
+
                         {activeSetMenu?.eIndex === eIndex && activeSetMenu?.sIndex === sIndex && (
                           <div className="flex justify-between items-center bg-gray-800 dark:bg-gray-900 text-white p-2 rounded-xl mt-1 mb-1 animate-fade-in-up shadow-lg z-20">
                             <button onClick={() => moveSet(eIndex, sIndex, -1)} disabled={sIndex === 0} className={`flex-1 font-bold text-xs py-1.5 transition-colors cursor-pointer ${sIndex === 0 ? 'opacity-30' : 'hover:text-blue-400'}`}>↑ W górę</button>
@@ -179,7 +253,10 @@ export default function WorkoutTab({
                           </div>
                         )}
                         
-                        <div className={`grid transition-all duration-500 ease-in-out ${timerSource?.exercise === eIndex && timerSource?.set === sIndex && timerActive ? 'grid-rows-[1fr] opacity-100 mt-2' : 'grid-rows-[0fr] opacity-0 mt-0'}`}>
+                        <div 
+                          className={`grid transition-all duration-500 ease-in-out ${timerSource?.exercise === eIndex && timerSource?.set === sIndex && timerActive ? 'grid-rows-[1fr] opacity-100 mt-2' : 'grid-rows-[0fr] opacity-0 mt-0'}`}
+                          ref={timerSource?.exercise === eIndex && timerSource?.set === sIndex ? timerRef : null}
+                        >
                           <div className="overflow-hidden">
                             <RestTimer timeLeft={timeLeft} setTimeLeft={setTimeLeft} setTimerActive={setTimerActive} formatTime={formatTime} variant="inline" />
                           </div>

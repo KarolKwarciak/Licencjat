@@ -31,8 +31,18 @@ export default function ExercisesTab({
   selectedMuscleFilter,
   setSelectedMuscleFilter,
   filteredExercises,
-  addExercise
+  addExercise,
+  workoutHistory
 }) {
+
+  // Pomocnicza funkcja do formatowania opisu
+  const getDisplayDescription = (desc) => {
+    if (!desc) return "Brak szczegółowego opisu dla tego ćwiczenia.";
+    if (desc === 'Odzyskane z historii Twoich treningów.') {
+      return "To ćwiczenie zostało automatycznie dodane z Twojej historii treningowej. Jeśli chcesz, możesz edytować nazwę lub dodać własny opis.";
+    }
+    return desc;
+  };
 
   if (selectedExerciseDetail) {
     return (
@@ -48,16 +58,56 @@ export default function ExercisesTab({
         </div>
         <div className="flex bg-gray-200/60 dark:bg-gray-800 p-1 rounded-xl shadow-inner">
           <button onClick={() => setExerciseSubTab('opis')} className={`flex-1 py-1.5 text-center text-[11px] font-black rounded-lg transition-all cursor-pointer ${exerciseSubTab === 'opis' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-700'}`}>Opis</button>
+          <button onClick={() => setExerciseSubTab('historia')} className={`flex-1 py-1.5 text-center text-[11px] font-black rounded-lg transition-all cursor-pointer ${exerciseSubTab === 'historia' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-700'}`}>Historia</button>
           <button onClick={() => setExerciseSubTab('progresja')} className={`flex-1 py-1.5 text-center text-[11px] font-black rounded-lg transition-all cursor-pointer ${exerciseSubTab === 'progresja' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-700'}`}>Wykres</button>
           <button onClick={() => setExerciseSubTab('rekordy')} className={`flex-1 py-1.5 text-center text-[11px] font-black rounded-lg transition-all cursor-pointer ${exerciseSubTab === 'rekordy' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-700'}`}>Rekordy</button>
         </div>
 
         {exerciseSubTab === 'opis' ? (
           <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 animate-fade-in-up flex flex-col gap-4">
-            <h3 className="font-bold text-gray-800 dark:text-white text-sm">Jak prawidłowo wykonywać:</h3>
+            <h3 className="font-bold text-gray-800 dark:text-white text-sm">Opis:</h3>
             <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-              {selectedExObject?.description ? selectedExObject.description : `Systematyczne wykonywanie tego ćwiczenia skutecznie stymuluje i rozwija partię: ${selectedExObject?.target}. Aby uzyskać optymalne efekty i uniknąć kontuzji, zadbaj o pełny zakres ruchu (ROM), kontrolowaną fazę ekscentryczną oraz stałe napięcie mięśniowe.`}
+              {getDisplayDescription(selectedExObject?.description)}
             </p>
+          </div>
+        ) : exerciseSubTab === 'historia' ? (
+          <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 animate-fade-in-up">
+            <h3 className="font-bold text-gray-800 dark:text-white text-sm mb-4">Historia wykonań:</h3>
+            <div className="flex flex-col gap-4">
+              {(() => {
+                const historyList = workoutHistory.filter(w => w.exercises.some(e => String(e.id) === String(selectedExObject?.id) || e.name === selectedExObject?.name));
+                
+                if (historyList.length === 0) {
+                  return <p className="text-sm text-gray-500 text-center py-4">Nie wykonałeś jeszcze tego ćwiczenia.</p>;
+                }
+
+                return historyList.map(workout => {
+                  const ex = workout.exercises.find(e => String(e.id) === String(selectedExObject?.id) || e.name === selectedExObject?.name);
+                  const validSets = ex.sets.filter(s => s.isCompleted);
+                  
+                  if (validSets.length === 0) return null;
+
+                  return (
+                    <div key={workout.id} className="border-b border-gray-100 dark:border-gray-700 pb-4 last:border-0 last:pb-0">
+                      <div className="text-xs text-gray-500 dark:text-gray-400 font-bold mb-2 flex items-center gap-2">
+                        <span>📅 {workout.date}</span>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {validSets.map((s, i) => (
+                          <div key={i} className="flex justify-between items-center text-sm bg-gray-50 dark:bg-gray-900/50 p-2.5 rounded-xl border border-gray-100 dark:border-gray-800">
+                            <span className="text-gray-500 font-black w-6 text-xs">{i + 1}.</span>
+                            <span className="font-black text-gray-800 dark:text-gray-200">{s.weight} kg × {s.reps}</span>
+                            <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${s.type === 'warmup' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-500' : s.type === 'failure' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-500' : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}>
+                              {s.type === 'warmup' ? 'Rozgrz.' : s.type === 'failure' ? 'Max' : 'Norm.'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })
+              })()}
+            </div>
           </div>
         ) : exerciseSubTab === 'progresja' ? (
           <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 animate-fade-in-up">

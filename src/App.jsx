@@ -1,5 +1,6 @@
-import { useState, useEffect, memo } from 'react'
+import { useState, useEffect, useMemo, memo } from 'react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { motion, AnimatePresence } from 'framer-motion'
 import { EXERCISES_DB } from './data/exercises'
 import { supabase } from './supabaseClient'
 
@@ -15,7 +16,7 @@ import WorkoutTab from './views/WorkoutTab'
 import CalendarTabRaw from './views/CalendarTab'
 import ProfileTabRaw from './views/ProfileTab'
 
-// PUNKT 3: Optymalizacja re-renderów przy użyciu React.memo
+// Optymalizacja re-renderów przy użyciu React.memo
 const HistoryTab = memo(HistoryTabRaw)
 const ExercisesTab = memo(ExercisesTabRaw)
 const CalendarTab = memo(CalendarTabRaw)
@@ -27,8 +28,6 @@ function App() {
   const [session, setSession] = useState(null)
   const [activeTab, setActiveTab] = useState('workout')
   const [loadingData, setLoadingData] = useState(false)
-  
-  // PUNKT 2: Stan blokady przycisków (Loading state dla operacji asynchronicznych)
   const [isSaving, setIsSaving] = useState(false)
   
   // --- SYSTEM TOASTÓW ---
@@ -48,20 +47,36 @@ function App() {
     setConfirmModal({ message, onConfirm, confirmText, cancelText, onCancel });
   }
 
-  // --- STANY APLIKACJI ---
-  const [isWorkoutActive, setIsWorkoutActive] = useState(false)
-  const [currentWorkout, setCurrentWorkout] = useState([])
-  const [workoutHistory, setWorkoutHistory] = useState([])
-  const [editingWorkoutId, setEditingWorkoutId] = useState(null)
-  const [highlightedWorkoutId, setHighlightedWorkoutId] = useState(null)
-  const [activeSetMenu, setActiveSetMenu] = useState(null) 
-  
-  const [timerActive, setTimerActive] = useState(false)
+  // --- STANY APLIKACJI Z AUTO-SAVEM W LOCALSTORAGE ---
+  const [isWorkoutActive, setIsWorkoutActive] = useState(() => JSON.parse(localStorage.getItem('fitApp_isWorkoutActive')) || false)
+  const [currentWorkout, setCurrentWorkout] = useState(() => JSON.parse(localStorage.getItem('fitApp_currentWorkout')) || [])
+  const [workoutStartTime, setWorkoutStartTime] = useState(() => JSON.parse(localStorage.getItem('fitApp_workoutStartTime')) || null)
+  const [elapsedTime, setElapsedTime] = useState(() => JSON.parse(localStorage.getItem('fitApp_elapsedTime')) || 0)
+  const [editingWorkoutId, setEditingWorkoutId] = useState(() => JSON.parse(localStorage.getItem('fitApp_editingWorkoutId')) || null)
+
+  const [timerActive, setTimerActive] = useState(() => JSON.parse(localStorage.getItem('fitApp_timerActive')) || false)
+  const [timerTarget, setTimerTarget] = useState(() => JSON.parse(localStorage.getItem('fitApp_timerTarget')) || null)
+  const [timerSource, setTimerSource] = useState(() => JSON.parse(localStorage.getItem('fitApp_timerSource')) || null)
   const [timeLeft, setTimeLeft] = useState(0)
   const [defaultRestTime, setDefaultRestTime] = useState(180) 
-  const [timerSource, setTimerSource] = useState(null)
-  const [workoutStartTime, setWorkoutStartTime] = useState(null)
-  const [elapsedTime, setElapsedTime] = useState(0)
+  const [isInlineTimerVisible, setIsInlineTimerVisible] = useState(true)
+
+  // EFEKT ZAPISUJĄCY TRENING W TLE
+  useEffect(() => {
+    localStorage.setItem('fitApp_isWorkoutActive', JSON.stringify(isWorkoutActive));
+    localStorage.setItem('fitApp_currentWorkout', JSON.stringify(currentWorkout));
+    localStorage.setItem('fitApp_workoutStartTime', JSON.stringify(workoutStartTime));
+    localStorage.setItem('fitApp_elapsedTime', JSON.stringify(elapsedTime));
+    localStorage.setItem('fitApp_editingWorkoutId', JSON.stringify(editingWorkoutId));
+    localStorage.setItem('fitApp_timerActive', JSON.stringify(timerActive));
+    localStorage.setItem('fitApp_timerTarget', JSON.stringify(timerTarget));
+    localStorage.setItem('fitApp_timerSource', JSON.stringify(timerSource));
+  }, [isWorkoutActive, currentWorkout, workoutStartTime, elapsedTime, editingWorkoutId, timerActive, timerTarget, timerSource]);
+
+
+  const [workoutHistory, setWorkoutHistory] = useState([])
+  const [highlightedWorkoutId, setHighlightedWorkoutId] = useState(null)
+  const [activeSetMenu, setActiveSetMenu] = useState(null) 
 
   const [showExerciseModal, setShowExerciseModal] = useState(false)
   const [selectedExerciseDetail, setSelectedExerciseDetail] = useState(null)
@@ -94,16 +109,31 @@ function App() {
   const [isModalFilterOpen, setIsModalFilterOpen] = useState(false)
   const [isCreateExFilterOpen, setIsCreateExFilterOpen] = useState(false)
 
-  const allExercises = [...EXERCISES_DB, ...customExercises]
+  // NAPRAWA BŁĘDU: Zdefiniowanie allTemplates z powrotem!
   const allTemplates = [...customTemplates]
 
-  // --- EFEKTY POBIERANIA ---
+  // --- EFEKTY POBIERANIA DANYCH I SESJI ---
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session))
     return () => subscription.unsubscribe()
   }, [])
 
+  // BEZPIECZNE ŁADOWANIE WŁASNYCH ĆWICZEŃ Z LOCAL STORAGE
+  useEffect(() => {
+    let savedExercises = null;
+    if (session?.user?.id) {
+      savedExercises = localStorage.getItem(`fitAppExercises_${session.user.id}`);
+    }
+    if (!savedExercises) {
+      savedExercises = localStorage.getItem('fitAppExercises_undefined') || localStorage.getItem('fitApp_customExercises');
+    }
+    if (savedExercises) {
+      setCustomExercises(JSON.parse(savedExercises));
+    }
+  }, [session?.user?.id])
+
+  // POBIERANIE Z CHMURY
   useEffect(() => {
     if (!session?.user?.id) return;
     const uid = session.user.id;
@@ -137,8 +167,6 @@ function App() {
           setUserHeight(cloudProfile.height || '');
           localStorage.setItem(`fitAppHeight_${uid}`, cloudProfile.height || '');
         }
-        
-        showToast("Zsynchronizowano z chmurą! ☁️", "success");
       } catch (err) {
         console.error("Błąd sieci:", err);
         const savedHistory = localStorage.getItem(`fitAppHistory_${uid}`)
@@ -149,15 +177,11 @@ function App() {
         if (savedMeasurements) setMeasurements(JSON.parse(savedMeasurements))
         const savedHeight = localStorage.getItem(`fitAppHeight_${uid}`)
         if (savedHeight) setUserHeight(savedHeight)
-        showToast("Działasz w trybie offline 📴", "info");
       } finally {
         setLoadingData(false);
       }
     };
     fetchCloudData();
-
-    const savedExercises = localStorage.getItem(`fitAppExercises_${uid}`)
-    setCustomExercises(savedExercises ? JSON.parse(savedExercises) : [])
   }, [session?.user?.id])
 
   useEffect(() => {
@@ -165,12 +189,25 @@ function App() {
     if (savedTheme === 'dark') { setIsDarkMode(true); document.documentElement.classList.add('dark'); }
   }, [])
 
+  // --- STOPER OPARTY O TIMESTAMPY Z POWIADOMIENIAMI ---
   useEffect(() => {
-    let interval = null
-    if (timerActive && timeLeft > 0) interval = setInterval(() => { setTimeLeft(prev => prev - 1) }, 1000)
-    else if (timeLeft === 0) { setTimerActive(false); clearInterval(interval); }
-    return () => clearInterval(interval)
-  }, [timerActive, timeLeft])
+    let interval = null;
+    if (timerActive && timerTarget) {
+      interval = setInterval(() => {
+        const remain = Math.ceil((timerTarget - Date.now()) / 1000);
+        if (remain > 0) {
+          setTimeLeft(remain);
+        } else {
+          setTimerActive(false);
+          setTimeLeft(0);
+          setTimerTarget(null);
+          clearInterval(interval);
+          if ('vibrate' in navigator) navigator.vibrate([200, 100, 200, 100, 400]);
+        }
+      }, 500);
+    }
+    return () => clearInterval(interval);
+  }, [timerActive, timerTarget]);
 
   useEffect(() => {
     let interval = null
@@ -183,11 +220,36 @@ function App() {
     else { document.documentElement.classList.add('dark'); localStorage.setItem('fitAppTheme', 'dark'); setIsDarkMode(true); }
   }
 
+  // INTELIGENTNA LISTA ĆWICZEŃ (Auto-Recovery z historii)
+  const allExercises = useMemo(() => {
+    const baseList = [...EXERCISES_DB, ...customExercises];
+    const existingNames = new Set(baseList.map(e => e.name.toLowerCase().trim()));
+    const recoveredExercises = [];
+
+    // Przeszukuje całą historię treningów, żeby upewnić się, że żadne użyte ćwiczenie nie zniknęło
+    workoutHistory.forEach(workout => {
+      workout.exercises.forEach(ex => {
+        const exName = ex.name.toLowerCase().trim();
+        if (!existingNames.has(exName)) {
+          recoveredExercises.push({
+            id: ex.id || `recovered-${Date.now()}-${Math.random()}`,
+            name: ex.name,
+            target: ex.target || 'Inne',
+            description: ex.description || 'Odzyskane z historii Twoich treningów.'
+          });
+          existingNames.add(exName);
+        }
+      });
+    });
+
+    return [...baseList, ...recoveredExercises];
+  }, [customExercises, workoutHistory]);
+
+
   // --- ZARZĄDZANIE DANYMI ---
   const handleSaveMeasurement = async () => {
     if (!measForm.weight && !measForm.waist && !measForm.biceps) return showToast("Wpisz przynajmniej jedną wartość!", "error");
-    
-    setIsSaving(true); // WŁĄCZONA BLOKADA ZAPISU POMIARU
+    setIsSaving(true); 
     try {
       const uid = session?.user?.id;
       const newMeas = { user_id: uid, date: new Date().toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }), ...measForm };
@@ -231,19 +293,27 @@ function App() {
     return `${m}:${s < 10 ? '0' : ''}${s}`
   }
 
-  // --- TRENING LOGIKA ---
   const startWorkout = () => {
-    setEditingWorkoutId(null); setIsWorkoutActive(true); setTimerSource(null); setWorkoutStartTime(Date.now()); setElapsedTime(0);
+    setEditingWorkoutId(null); setIsWorkoutActive(true); setTimerSource(null); 
+    setTimerTarget(null); setTimerActive(false); setWorkoutStartTime(Date.now()); setElapsedTime(0);
   }
 
   const startWorkoutFromTemplate = (template) => {
-    setEditingWorkoutId(null); setCurrentWorkout(JSON.parse(JSON.stringify(template.exercises))); setIsWorkoutActive(true); setTimerSource(null); setWorkoutStartTime(Date.now()); setElapsedTime(0);
+    setEditingWorkoutId(null); setCurrentWorkout(JSON.parse(JSON.stringify(template.exercises))); 
+    setIsWorkoutActive(true); setTimerSource(null); setTimerTarget(null); setTimerActive(false); 
+    setWorkoutStartTime(Date.now()); setElapsedTime(0);
+  }
+
+  const clearAutoSave = () => {
+    ['fitApp_isWorkoutActive', 'fitApp_currentWorkout', 'fitApp_workoutStartTime', 'fitApp_elapsedTime', 'fitApp_editingWorkoutId', 'fitApp_timerActive', 'fitApp_timerTarget', 'fitApp_timerSource'].forEach(k => localStorage.removeItem(k));
   }
 
   const cancelWorkout = () => {
     const msg = editingWorkoutId ? 'Czy chcesz porzucić edycję tego treningu?' : 'Czy na pewno chcesz anulować trening? Postęp zostanie utracony.';
     showConfirmationModal(msg, () => {
-      setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setEditingWorkoutId(null); setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0);
+      setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setTimerTarget(null);
+      setEditingWorkoutId(null); setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0);
+      clearAutoSave();
     });
   }
 
@@ -275,19 +345,27 @@ function App() {
 
     if (finalWorkoutData.length === 0) {
       showToast('Brak ukończonych serii! Trening niezapisany.', 'error');
-      setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setWorkoutStartTime(null); setElapsedTime(0); return;
+      cancelWorkout(); return;
     }
 
     let newPRsCount = 0; let workoutVolume = 0;
+    const summaryExercisesList = [];
+
     finalWorkoutData.forEach(ex => {
       let currentMax1RM = -1;
+      let bestSetStr = "-";
+
       ex.sets.forEach(set => {
         const wgt = parseFloat(set.weight) || 0; const rps = parseInt(set.reps) || 0;
         workoutVolume += (wgt * rps);
         const oneRM = wgt === 0 ? rps : wgt * (1 + rps / 30);
-        if (oneRM > currentMax1RM) currentMax1RM = oneRM;
+        if (oneRM > currentMax1RM) {
+          currentMax1RM = oneRM;
+          bestSetStr = `${wgt} kg × ${rps}`;
+        }
       });
 
+      let isPR = false;
       if (currentMax1RM >= 0) {
         let historicalMax1RM = -1;
         workoutHistory.forEach(w => {
@@ -303,8 +381,17 @@ function App() {
             });
           }
         });
-        if (currentMax1RM > historicalMax1RM) newPRsCount++;
+        if (currentMax1RM > historicalMax1RM) {
+          newPRsCount++;
+          isPR = true;
+        }
       }
+
+      summaryExercisesList.push({
+        name: ex.name,
+        bestSetString: bestSetStr,
+        isPR: isPR
+      });
     });
     
     const uid = session?.user?.id; let updatedHistory = [...workoutHistory]; let finalWorkoutObj = null;
@@ -320,21 +407,33 @@ function App() {
     setWorkoutHistory(updatedHistory);
     if(uid) localStorage.setItem(`fitAppHistory_${uid}`, JSON.stringify(updatedHistory));
 
+    setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setTimerTarget(null);
+    setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0); setActiveSetMenu(null);
+    clearAutoSave();
+
     if (uid && finalWorkoutObj) {
-      setIsSaving(true); // WŁĄCZONA BLOKADA ZAPISU TRENINGU
+      setIsSaving(true);
       try {
         const { error } = await supabase.from('workouts').upsert(finalWorkoutObj);
         if (error) showToast(`Zapisano lokalnie. Błąd chmury: ${error.message}`, "error");
         else showToast("Trening potężnie zapisany w chmurze! 🚀", "success");
       } catch(e) {
-        console.error(e);
+        showToast("Brak internetu. Trening zapisany bezpiecznie w telefonie 📴", "info");
       } finally {
         setIsSaving(false);
       }
     }
 
-    if (!editingWorkoutId) setShowSummaryModal({ duration: elapsedTime, volume: workoutVolume, prs: newPRsCount, exerciseCount: finalWorkoutData.length });
-    setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0); setActiveSetMenu(null); setActiveTab('history');
+    if (!editingWorkoutId) {
+      setShowSummaryModal({ 
+        duration: finalWorkoutObj.duration, 
+        volume: workoutVolume, 
+        prs: newPRsCount, 
+        exerciseCount: finalWorkoutData.length,
+        exercises: summaryExercisesList 
+      });
+    }
+    setActiveTab('history');
   }
 
   const addExercise = (exercise) => {
@@ -347,9 +446,26 @@ function App() {
   const removeExerciseFromWorkout = (indexToRemove) => {
     showConfirmationModal('Czy usunąć to ćwiczenie z treningu?', () => {
       setCurrentWorkout(currentWorkout.filter((_, idx) => idx !== indexToRemove))
-      if (timerSource?.exercise === indexToRemove) { setTimerActive(false); setTimerSource(null); }
+      if (timerSource?.exercise === indexToRemove) { setTimerActive(false); setTimerTarget(null); setTimerSource(null); }
       else if (timerSource?.exercise > indexToRemove) setTimerSource({ exercise: timerSource.exercise - 1, set: timerSource.set })
     });
+  }
+
+  const moveExercise = (index, direction) => {
+    const newWorkout = [...currentWorkout];
+    if (index + direction < 0 || index + direction >= newWorkout.length) return;
+    
+    const temp = newWorkout[index];
+    newWorkout[index] = newWorkout[index + direction];
+    newWorkout[index + direction] = temp;
+    
+    if (timerSource?.exercise === index) {
+      setTimerSource({ exercise: index + direction, set: timerSource.set });
+    } else if (timerSource?.exercise === index + direction) {
+      setTimerSource({ exercise: index, set: timerSource.set });
+    }
+    
+    setCurrentWorkout(newWorkout);
   }
 
   const handleCreateExercise = () => {
@@ -381,7 +497,8 @@ function App() {
   }
 
   const handleEditPastWorkout = (workout) => {
-    setEditingWorkoutId(workout.id); setCurrentWorkout(JSON.parse(JSON.stringify(workout.exercises))); setIsWorkoutActive(true); setWorkoutStartTime(null); setElapsedTime(workout.duration || 0); setActiveTab('workout');
+    setEditingWorkoutId(workout.id); setCurrentWorkout(JSON.parse(JSON.stringify(workout.exercises))); 
+    setIsWorkoutActive(true); setWorkoutStartTime(Date.now() - (workout.duration * 1000)); setElapsedTime(workout.duration || 0); setActiveTab('workout');
   }
 
   const handleDeletePastWorkout = async (workoutId) => {
@@ -406,8 +523,21 @@ function App() {
   const toggleSetComplete = (eIndex, sIndex) => {
     const newWorkout = [...currentWorkout]; const isNowCompleted = !newWorkout[eIndex].sets[sIndex].isCompleted;
     newWorkout[eIndex].sets[sIndex].isCompleted = isNowCompleted; setCurrentWorkout(newWorkout);
-    if (isNowCompleted) { setTimeLeft(defaultRestTime); setTimerActive(true); setTimerSource({ exercise: eIndex, set: sIndex }); } 
-    else { if (timerSource?.exercise === eIndex && timerSource?.set === sIndex) { setTimerActive(false); setTimerSource(null); } }
+    
+    if (isNowCompleted) { 
+      const setType = newWorkout[eIndex].sets[sIndex].type;
+      const isWarmup = setType === 'warm-up' || setType === 'W'; 
+      const restTimeSeconds = isWarmup ? 60 : defaultRestTime;
+
+      setTimerTarget(Date.now() + restTimeSeconds * 1000); 
+      setTimeLeft(restTimeSeconds); 
+      setTimerActive(true); 
+      setTimerSource({ exercise: eIndex, set: sIndex }); 
+    } else { 
+      if (timerSource?.exercise === eIndex && timerSource?.set === sIndex) { 
+        setTimerActive(false); setTimerTarget(null); setTimerSource(null); 
+      } 
+    }
   }
 
   const moveSet = (eIndex, sIndex, direction) => {
@@ -446,37 +576,15 @@ function App() {
     }
   }
 
-  // --- ZABEZPIECZONE FUNKCJE OBLICZENIOWE (Derived State) ---
-  let totalVolume = 0; let totalSets = 0
-  workoutHistory.forEach(workout => {
-    workout.exercises.forEach(ex => { ex.sets.forEach(set => { if (set.isCompleted && set.weight !== '' && set.reps !== '') { totalVolume += (parseFloat(set.weight) || 0) * (parseInt(set.reps) || 0); totalSets += 1; } }) })
-  })
+  const { totalVolume, totalSets } = useMemo(() => {
+    let vol = 0; let sets = 0;
+    workoutHistory.forEach(workout => {
+      workout.exercises.forEach(ex => { ex.sets.forEach(set => { if (set.isCompleted && set.weight !== '' && set.reps !== '') { vol += (parseFloat(set.weight) || 0) * (parseInt(set.reps) || 0); sets += 1; } }) })
+    })
+    return { totalVolume: vol, totalSets: sets };
+  }, [workoutHistory]);
 
-  const latestWeight = measurements.length > 0 ? parseFloat(measurements[0].weight?.replace(',','.')) : null;
-  const heightInMeters = userHeight ? parseFloat(userHeight) / 100 : null;
-  let bmi = null; let bmiColor = "text-gray-400"; let bmiCategory = "Brak danych"; let markerPos = 0;
-
-  if (latestWeight && heightInMeters && latestWeight > 0 && heightInMeters > 0) {
-    bmi = (latestWeight / (heightInMeters * heightInMeters)).toFixed(1);
-    if (bmi < 18.5) { bmiColor = "text-blue-500"; bmiCategory = "Niedowaga"; }
-    else if (bmi < 25) { bmiColor = "text-green-500"; bmiCategory = "Norma"; }
-    else if (bmi < 30) { bmiColor = "text-yellow-500"; bmiCategory = "Nadwaga"; }
-    else { bmiColor = "text-red-500"; bmiCategory = "Otyłość"; }
-    markerPos = Math.min(100, Math.max(0, ((parseFloat(bmi) - 15) / 20) * 100));
-  }
-
-  const shareWorkout = () => {
-    if (navigator.share && showSummaryModal) {
-      navigator.share({
-        title: 'Mój dzisiejszy trening 💪',
-        text: `Właśnie ukończyłem świetny trening w FitApp!\n⏱ Czas: ${formatTime(showSummaryModal.duration)}\n🏋️‍♂️ Tonaż: ${showSummaryModal.volume} kg\n🏆 Nowe Rekordy: ${showSummaryModal.prs}\nLecimy po więcej! 🔥`,
-      }).catch(console.error);
-    } else {
-      showToast("Twoja przeglądarka nie wspiera tej funkcji, ale zrób screena!", "info");
-    }
-  }
-
-  const calculateStreaks = () => {
+  const streaks = useMemo(() => {
     if (workoutHistory.length === 0) return { current: 0, longest: 0 }
     const uniqueDates = Array.from(new Set(workoutHistory.map(w => { const d = new Date(w.id); d.setHours(0, 0, 0, 0); return d.getTime(); }))).sort((a, b) => b - a)
     if (uniqueDates.length === 0) return { current: 0, longest: 0 }
@@ -495,12 +603,11 @@ function App() {
       if (currentCount > maxStreak) maxStreak = currentCount; lastTime = time;
     })
     return { current: currentStreak, longest: maxStreak }
-  }
+  }, [workoutHistory]);
 
-  const streaks = calculateStreaks()
-  const workoutDatesSet = new Set(workoutHistory.map(w => new Date(w.id).toDateString()))
+  const workoutDatesSet = useMemo(() => new Set(workoutHistory.map(w => new Date(w.id).toDateString())), [workoutHistory]);
 
-  const getWeeklyActivity = () => {
+  const weeklyActivity = useMemo(() => {
     const today = new Date(); const currentDay = today.getDay(); const adjustedDay = currentDay === 0 ? 6 : currentDay - 1
     const startOfWeek = new Date(today); startOfWeek.setDate(today.getDate() - adjustedDay); startOfWeek.setHours(0, 0, 0, 0)
     const days = ['Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So', 'Nd']
@@ -516,9 +623,9 @@ function App() {
       }
       return { dayName, hasWorkout: blockLength > 0, isToday: index === adjustedDay, streak: blockLength }
     })
-  }
+  }, [workoutDatesSet]);
 
-  const getYearlyCalendar = () => {
+  const yearlyData = useMemo(() => {
     const year = new Date().getFullYear(); const monthsData = []; const monthNames = ['Styczeń', 'Luty', 'Marzec', 'Kwiecień', 'Maj', 'Czerwiec', 'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień']
     for (let m = 0; m < 12; m++) {
       const daysInMonth = new Date(year, m + 1, 0).getDate(); const firstDay = new Date(year, m, 1).getDay(); const startingBlanks = firstDay === 0 ? 6 : firstDay - 1; const days = []
@@ -538,7 +645,7 @@ function App() {
       monthsData.push({ name: monthNames[m], days })
     }
     return { year, months: monthsData }
-  }
+  }, [workoutDatesSet]);
 
   const getStreakColorClass = (streak, isToday, hasWorkout) => {
     if (!hasWorkout) return isToday ? 'border border-blue-400 dark:border-blue-500 text-blue-600 dark:text-blue-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
@@ -547,19 +654,19 @@ function App() {
     return 'bg-gradient-to-tr from-red-500 to-yellow-400 text-white shadow-lg shadow-red-500/40 font-black'
   }
 
-  const filteredExercises = allExercises.filter(ex => {
+  const filteredExercises = useMemo(() => allExercises.filter(ex => {
     const matchesSearch = ex.name.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesMuscle = selectedMuscleFilter === 'Wszystkie' || ex.target === selectedMuscleFilter
     return matchesSearch && matchesMuscle
-  })
+  }), [allExercises, searchQuery, selectedMuscleFilter]);
 
   const selectedExObject = selectedExerciseDetail ? (allExercises.find(e => String(e.id) === String(selectedExerciseDetail.id) || e.name === selectedExerciseDetail.name) || selectedExerciseDetail) : null;
 
-  const get1RMData = (exObj) => {
-    if (!exObj) return []
+  const detailedChartData = useMemo(() => {
+    if (!selectedExObject) return []
     const data = []; const sortedHistory = [...workoutHistory].sort((a, b) => a.id - b.id) 
     sortedHistory.forEach(workout => {
-      const ex = workout.exercises.find(e => String(e.id) === String(exObj.id) || e.name === exObj.name)
+      const ex = workout.exercises.find(e => String(e.id) === String(selectedExObject.id) || e.name === selectedExObject.name)
       if (ex) {
         let max1RM = 0
         ex.sets.forEach(set => {
@@ -573,64 +680,119 @@ function App() {
       }
     })
     return data
+  }, [selectedExObject, workoutHistory]);
+
+  const { maxWeightStr, max1RMStr, maxVolStr } = useMemo(() => {
+    let wStr = "-"; let rmStr = "-"; let vStr = "-";
+    if (selectedExObject) {
+      let wMax = -1; let rmMax = -1; let vMax = -1;
+      workoutHistory.forEach(w => {
+        const ex = w.exercises.find(e => String(e.id) === String(selectedExObject.id) || e.name === selectedExObject.name);
+        if (ex) {
+          ex.sets.forEach(set => {
+            if (set.isCompleted && set.weight !== '' && set.reps !== '') {
+              const wgt = parseFloat(set.weight) || 0; const rps = parseInt(set.reps) || 0;
+              const rm = wgt === 0 ? rps : wgt * (1 + rps / 30); const vol = wgt * rps;
+              if (wgt > wMax) { wMax = wgt; wStr = `${wgt} kg × ${rps}`; } 
+              else if (wgt === 0 && wMax <= 0) { if (wMax === -1 || rps > parseInt(wStr.split('×')[1] || 0)) { wMax = wgt; wStr = `${wgt} kg × ${rps}`; } }
+              if (rm > rmMax) { rmMax = rm; rmStr = wgt === 0 ? `${rps} powt. (BW)` : `${Math.round(rm)} kg`; }
+              if (vol > vMax) { vMax = vol; vStr = `${vol} kg`; } 
+              else if (wgt === 0 && vMax <= 0) { if (vMax === -1 || rps > vMax) { vMax = 0; vStr = `${rps} powt. (BW)`; } }
+            }
+          });
+        }
+      });
+    }
+    return { maxWeightStr: wStr, max1RMStr: rmStr, maxVolStr: vStr }
+  }, [selectedExObject, workoutHistory]);
+
+
+  const latestWeight = measurements.length > 0 ? parseFloat(measurements[0].weight?.replace(',','.')) : null;
+  const heightInMeters = userHeight ? parseFloat(userHeight) / 100 : null;
+  let bmi = null; let bmiColor = "text-gray-400"; let bmiCategory = "Brak danych"; let markerPos = 0;
+
+  if (latestWeight && heightInMeters && latestWeight > 0 && heightInMeters && heightInMeters > 0) {
+    bmi = (latestWeight / (heightInMeters * heightInMeters)).toFixed(1);
+    if (bmi < 18.5) { bmiColor = "text-blue-500"; bmiCategory = "Niedowaga"; }
+    else if (bmi < 25) { bmiColor = "text-green-500"; bmiCategory = "Norma"; }
+    else if (bmi < 30) { bmiColor = "text-yellow-500"; bmiCategory = "Nadwaga"; }
+    else { bmiColor = "text-red-500"; bmiCategory = "Otyłość"; }
+    markerPos = Math.min(100, Math.max(0, ((parseFloat(bmi) - 15) / 20) * 100));
   }
 
-  const weeklyActivity = getWeeklyActivity(); const yearlyData = getYearlyCalendar(); 
-  const detailedChartData = selectedExObject ? get1RMData(selectedExObject) : []
-
-  let maxWeightStr = "-"; let max1RMStr = "-"; let maxVolStr = "-";
-  if (selectedExObject) {
-    let wMax = -1; let rmMax = -1; let vMax = -1;
-    workoutHistory.forEach(w => {
-      const ex = w.exercises.find(e => String(e.id) === String(selectedExObject.id) || e.name === selectedExObject.name);
-      if (ex) {
-        ex.sets.forEach(set => {
-          if (set.isCompleted && set.weight !== '' && set.reps !== '') {
-            const wgt = parseFloat(set.weight) || 0; const rps = parseInt(set.reps) || 0;
-            const rm = wgt === 0 ? rps : wgt * (1 + rps / 30); const vol = wgt * rps;
-            if (wgt > wMax) { wMax = wgt; maxWeightStr = `${wgt} kg × ${rps}`; } 
-            else if (wgt === 0 && wMax <= 0) { if (wMax === -1 || rps > parseInt(maxWeightStr.split('×')[1] || 0)) { wMax = wgt; maxWeightStr = `${wgt} kg × ${rps}`; } }
-            if (rm > rmMax) { rmMax = rm; max1RMStr = wgt === 0 ? `${rps} powt. (BW)` : `${Math.round(rm)} kg`; }
-            if (vol > vMax) { vMax = vol; maxVolStr = `${vol} kg`; } 
-            else if (wgt === 0 && vMax <= 0) { if (vMax === -1 || rps > vMax) { vMax = 0; maxVolStr = `${rps} powt. (BW)`; } }
-          }
-        });
-      }
-    });
+  const shareWorkout = () => {
+    if (navigator.share && showSummaryModal) {
+      navigator.share({
+        title: 'Mój dzisiejszy trening 💪',
+        text: `Właśnie ukończyłem świetny trening w FitApp!\n⏱ Czas: ${formatTime(showSummaryModal.duration)}\n🏋️‍♂️ Tonaż: ${showSummaryModal.volume} kg\nLecimy po więcej! 🔥`,
+      }).catch(console.error);
+    } else {
+      showToast("Twoja przeglądarka nie wspiera tej funkcji, ale zrób screena!", "info");
+    }
   }
 
   const displayName = session?.user?.user_metadata?.username || session?.user?.email?.split('@')[0] || 'Użytkownik';
 
+  const shouldShowSmartWidget = isWorkoutActive && !showExerciseModal && !showSummaryModal && !showMeasurementModal && !showMeasurementHistory && (
+    (activeTab !== 'workout') || (activeTab === 'workout' && timerActive && !isInlineTimerVisible)
+  );
+
   if (!session) return <Auth />
 
   return (
-    <div className="max-w-md mx-auto h-[100dvh] bg-gray-50 dark:bg-gray-900 flex flex-col font-sans shadow-2xl relative overflow-hidden transition-colors duration-300">
+    <div className="max-w-md mx-auto h-[100dvh] bg-gray-50 dark:bg-gray-900 flex flex-col font-sans shadow-2xl relative overflow-hidden transition-colors duration-300 fitapp-container">
+      <style>{`
+        .recharts-wrapper *:focus {
+          outline: none !important;
+        }
+      `}</style>
       
-      {toast && (
-        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[200] w-[85%] max-w-sm rounded-2xl p-4 shadow-2xl flex items-center gap-3 animate-fade-in-up border backdrop-blur-xl bg-opacity-95 ${toast.type === 'error' ? 'bg-red-900/90 border-red-700 text-red-50' : toast.type === 'success' ? 'bg-green-900/90 border-green-700 text-green-50' : 'bg-gray-900/90 border-gray-700 text-white'}`}>
-          <span className="text-xl">{toast.type === 'success' ? '🔥' : toast.type === 'error' ? '❌' : 'ℹ️'}</span>
-          <span className="text-xs font-black tracking-wide leading-relaxed">{toast.message}</span>
-        </div>
-      )}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -50, x: '-50%' }}
+            transition={{ type: 'spring', bounce: 0.4 }}
+            className={`fixed top-4 left-1/2 z-[200] w-[85%] max-w-sm rounded-2xl p-4 shadow-2xl flex items-center gap-3 border backdrop-blur-xl bg-opacity-95 ${toast.type === 'error' ? 'bg-red-900/90 border-red-700 text-red-50' : toast.type === 'success' ? 'bg-green-900/90 border-green-700 text-green-50' : 'bg-gray-900/90 border-gray-700 text-white'}`}
+          >
+            <span className="text-xl">{toast.type === 'success' ? '🔥' : toast.type === 'error' ? '❌' : 'ℹ️'}</span>
+            <span className="text-xs font-black tracking-wide leading-relaxed">{toast.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {confirmModal && (
-        <div className="fixed inset-0 z-[250] bg-gray-900/60 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 w-full max-w-sm flex flex-col gap-4 transform transition-all scale-100">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-yellow-50 dark:bg-yellow-900/20 flex items-center justify-center text-yellow-500 text-xl">⚠️</div>
-                <h3 className="font-extrabold text-gray-900 dark:text-white text-lg">Zaraz, zaraz...</h3>
+      <AnimatePresence>
+        {confirmModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[250] bg-gray-900/60 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', bounce: 0.5 }}
+              className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 w-full max-w-sm flex flex-col gap-4"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-yellow-50 dark:bg-yellow-900/20 flex items-center justify-center text-yellow-500 text-xl">⚠️</div>
+                  <h3 className="font-extrabold text-gray-900 dark:text-white text-lg">Zaraz, zaraz...</h3>
+                </div>
+                <button onClick={() => setConfirmModal(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 font-bold text-xl px-2 cursor-pointer">✕</button>
               </div>
-              <button onClick={() => setConfirmModal(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 font-bold text-xl px-2 cursor-pointer">✕</button>
-            </div>
-            <p className="text-sm text-gray-600 dark:text-gray-300 font-medium whitespace-pre-line leading-relaxed">{confirmModal.message}</p>
-            <div className="flex gap-3 mt-2">
-              <button onClick={() => { if (confirmModal.onCancel) confirmModal.onCancel(); setConfirmModal(null); }} className="flex-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold py-3.5 rounded-xl text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-pointer">{confirmModal.cancelText}</button>
-              <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }} className="flex-1 bg-blue-600 text-white font-bold py-3.5 rounded-xl text-sm hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30 cursor-pointer">{confirmModal.confirmText}</button>
-            </div>
-          </div>
-        </div>
-      )}
+              <p className="text-sm text-gray-600 dark:text-gray-300 font-medium whitespace-pre-line leading-relaxed">{confirmModal.message}</p>
+              <div className="flex gap-3 mt-2">
+                <button onClick={() => { if (confirmModal.onCancel) confirmModal.onCancel(); setConfirmModal(null); }} className="flex-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold py-3.5 rounded-xl text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-pointer">{confirmModal.cancelText}</button>
+                <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }} className="flex-1 bg-blue-600 text-white font-bold py-3.5 rounded-xl text-sm hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30 cursor-pointer">{confirmModal.confirmText}</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <header className="sticky top-0 z-40 bg-white dark:bg-gray-800 shadow-md px-4 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center shrink-0 transition-colors duration-300">
         <div className="flex flex-col">
@@ -660,40 +822,83 @@ function App() {
         )}
       </header>
 
-      <main className="flex-1 overflow-y-auto pb-32 p-4 animate-fade-in-up relative">
-        
-        {showSummaryModal && (
-          <div className="absolute inset-0 z-50 bg-gray-50/90 dark:bg-gray-900/90 backdrop-blur-md flex flex-col justify-center items-center p-6 animate-fade-in-up">
-            <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 w-full text-center flex flex-col gap-6">
-              <div className="text-6xl animate-bounce">🎉</div>
-              <div>
-                <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-1">Trening Zakończony!</h2>
-                <p className="text-gray-500 dark:text-gray-400 text-sm font-medium">Dobra robota, {displayName}!</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl flex flex-col"><span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase">Czas</span><span className="text-xl font-black text-blue-600 dark:text-blue-400">{formatTime(showSummaryModal.duration)}</span></div>
-                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl flex flex-col"><span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase">Tonaż</span><span className="text-xl font-black text-green-600 dark:text-green-400">{showSummaryModal.volume} kg</span></div>
-                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl flex flex-col col-span-2 border border-yellow-200 dark:border-yellow-900/50 bg-yellow-50 dark:bg-yellow-900/10">
-                  <span className="text-xs font-bold text-yellow-600 dark:text-yellow-500 uppercase">Nowe Rekordy (PR)</span>
-                  <span className="text-2xl font-black text-yellow-600 dark:text-yellow-400">🏆 {showSummaryModal.prs}</span>
+      <main className="flex-1 overflow-y-auto pb-32 p-4 relative">
+        <AnimatePresence mode="wait">
+          {showSummaryModal && (
+            <motion.div 
+              key="summary-modal"
+              initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
+              animate={{ opacity: 1, backdropFilter: "blur(8px)" }}
+              exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
+              className="absolute inset-0 z-50 bg-gray-50/90 dark:bg-gray-900/90 flex flex-col justify-center items-center p-6"
+            >
+              <motion.div 
+                initial={{ scale: 0.8, y: 50, opacity: 0 }}
+                animate={{ scale: 1, y: 0, opacity: 1 }}
+                exit={{ scale: 0.8, y: 50, opacity: 0 }}
+                transition={{ type: "spring", bounce: 0.5, duration: 0.6 }}
+                className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 w-full text-center flex flex-col gap-5 max-h-[90dvh]"
+              >
+                <motion.div 
+                  initial={{ rotate: -10, scale: 0 }}
+                  animate={{ rotate: 0, scale: 1 }}
+                  transition={{ type: "spring", bounce: 0.6, delay: 0.2 }}
+                  className="text-6xl"
+                >
+                  🎉
+                </motion.div>
+                <div>
+                  <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-1">Trening Zakończony!</h2>
+                  <p className="text-gray-500 dark:text-gray-400 text-sm font-medium">To Twój <b>#{workoutHistory.length}</b> trening, {displayName}!</p>
                 </div>
-              </div>
-              <div className="flex flex-col gap-3 mt-4">
-                <div className="flex gap-3">
-                  <button onClick={shareWorkout} className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/30 hover:-translate-y-0.5 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
-                    Udostępnij
-                  </button>
-                  <button onClick={() => { navigator.clipboard.writeText(`Właśnie ukończyłem trening w FitApp!\n⏱ Czas: ${formatTime(showSummaryModal.duration)}\n🏋️‍♂️ Tonaż: ${showSummaryModal.volume} kg\n🏆 Rekordy: ${showSummaryModal.prs}\nLecimy po więcej! 🔥`); showToast("Skopiowano! Wklej na IG/FB 📝", "success"); }} className="flex-1 bg-gray-900 dark:bg-black text-white font-bold py-3.5 rounded-xl shadow-lg hover:-translate-y-0.5 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 border border-gray-700">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                    Kopiuj
-                  </button>
+                
+                <div className="grid grid-cols-2 gap-3 shrink-0">
+                  <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl flex flex-col"><span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-0.5">Czas</span><span className="text-xl font-black text-blue-600 dark:text-blue-400">{formatTime(showSummaryModal.duration)}</span></div>
+                  <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl flex flex-col"><span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-0.5">Tonaż</span><span className="text-xl font-black text-green-600 dark:text-green-400">{showSummaryModal.volume} kg</span></div>
                 </div>
-                <button onClick={() => setShowSummaryModal(null)} className="w-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-bold py-3.5 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 active:scale-95 transition-all cursor-pointer">Zamknij</button>
-              </div>
-            </div>
-          </div>
-        )}
+
+                <div className="bg-gray-50 dark:bg-gray-700/30 p-4 rounded-2xl flex flex-col gap-2 text-left overflow-y-auto custom-scrollbar border border-gray-200 dark:border-gray-700">
+                  <span className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Wykaz ćwiczeń i Twoje najlepsze serie</span>
+                  {showSummaryModal.exercises.map((ex, idx) => (
+                    <div key={idx} className="flex justify-between items-center border-b border-gray-200/50 dark:border-gray-600/50 pb-2.5 pt-1 last:border-0 last:pb-0">
+                      <span className="text-sm font-bold text-gray-800 dark:text-gray-200 truncate pr-2 flex-1">{ex.name}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[11px] font-black text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800 px-2 py-1 rounded-md shadow-sm border border-gray-100 dark:border-gray-700">
+                          {ex.bestSetString}
+                        </span>
+                        {ex.isPR && (
+                          <motion.span 
+                            initial={{ scale: 0, rotate: -20 }}
+                            animate={{ scale: 1, rotate: 0 }}
+                            transition={{ type: "spring", delay: 0.5 + (idx * 0.1) }}
+                            className="text-lg"
+                            title="Nowy Rekord!"
+                          >
+                            🏆
+                          </motion.span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-col gap-3 shrink-0">
+                  <div className="flex gap-3">
+                    <button onClick={shareWorkout} className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/30 hover:-translate-y-0.5 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                      Udostępnij
+                    </button>
+                    <button onClick={() => { navigator.clipboard.writeText(`Właśnie ukończyłem trening w FitApp!\n⏱ Czas: ${formatTime(showSummaryModal.duration)}\n🏋️‍♂️ Tonaż: ${showSummaryModal.volume} kg\nLecimy po więcej! 🔥`); showToast("Skopiowano! Wklej na IG/FB 📝", "success"); }} className="flex-1 bg-gray-900 dark:bg-black text-white font-bold py-3.5 rounded-xl shadow-lg hover:-translate-y-0.5 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 border border-gray-700">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                      Kopiuj
+                    </button>
+                  </div>
+                  <button onClick={() => setShowSummaryModal(null)} className="w-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-bold py-3.5 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 active:scale-95 transition-all cursor-pointer">Zamknij</button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {activeTab === 'history' && !showSummaryModal && (
           <HistoryTab 
@@ -740,6 +945,7 @@ function App() {
             setSelectedMuscleFilter={setSelectedMuscleFilter}
             filteredExercises={filteredExercises}
             addExercise={addExercise}
+            workoutHistory={workoutHistory}
           />
         )}
 
@@ -777,6 +983,11 @@ function App() {
             deleteSet={deleteSet}
             addSetToTemplate={addSetToTemplate}
             showConfirmationModal={showConfirmationModal}
+            moveExercise={moveExercise}
+            setIsInlineTimerVisible={setIsInlineTimerVisible}
+            setSelectedExerciseDetail={setSelectedExerciseDetail}
+            setExerciseSubTab={setExerciseSubTab}
+            setActiveTab={setActiveTab}
           />
         )}
 
@@ -820,112 +1031,169 @@ function App() {
         )}
       </main>
 
-      {/* GLOBALNE MODALE SZEFA */}
-      {showMeasurementHistory && (
-        <div className="absolute inset-0 z-[110] bg-gray-50 dark:bg-gray-900 flex flex-col transition-colors duration-300 animate-fade-in-up">
-          <header className="sticky top-0 z-40 bg-white dark:bg-gray-800 shadow-md px-4 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center shrink-0">
-            <h2 className="text-xl font-black dark:text-white tracking-tight">Historia pomiarów</h2>
-            <button onClick={() => setShowMeasurementHistory(false)} className="text-blue-500 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg text-sm cursor-pointer">Zamknij</button>
-          </header>
-          <div className="flex-1 overflow-y-auto p-4 space-y-5 pb-10">
-            {['weight', 'waist', 'biceps'].map(metric => {
-              const label = metric === 'weight' ? 'Waga (kg)' : metric === 'waist' ? 'Pas (cm)' : 'Biceps (cm)';
-              const color = metric === 'weight' ? '#2563eb' : metric === 'waist' ? '#16a34a' : '#dc2626';
-              const mData = [...measurements].reverse().filter(m => m[metric]).map((m, index) => ({ id: index, date: m.date.slice(0, 5), fullDate: m.date, value: parseFloat(m[metric].replace(',','.')) }));
-              if (mData.length === 0) return null;
-              return (
-                <div key={metric} className="bg-white dark:bg-gray-800 p-5 rounded-3xl shadow-lg border border-gray-200 dark:border-gray-700">
-                  <h3 className="font-extrabold text-gray-800 dark:text-gray-100 mb-5 text-sm uppercase tracking-widest">{label}</h3>
-                  <div className="h-48 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={mData}>
-                        <defs><linearGradient id={`color${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={color} stopOpacity={0.5}/><stop offset="95%" stopColor={color} stopOpacity={0}/></linearGradient></defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#374151' : '#f3f4f6'} />
-                        <XAxis dataKey="id" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? '#9ca3af' : '#9ca3af', fontWeight: 'bold' }} tickFormatter={(id) => mData.find(d => d.id === id)?.date || ''} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? '#9ca3af' : '#9ca3af', fontWeight: 'bold' }} width={30} domain={['dataMin - 2', 'dataMax + 2']} />
-                        <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: isDarkMode ? '#1f2937' : '#ffffff', color: isDarkMode ? '#f3f4f6' : '#374151', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)' }} labelStyle={{ fontWeight: '900', marginBottom: '4px', textTransform: 'uppercase', fontSize: '10px', color: '#9ca3af', letterSpacing: '0.05em' }} labelFormatter={(id) => mData.find(d => d.id === id)?.fullDate || ''} formatter={(value) => [`${value}`, label.split(' ')[0]]} />
-                        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={4} fillOpacity={1} fill={`url(#color${metric})`} dot={{ r: 5, fill: color, stroke: isDarkMode ? '#1f2937' : '#fff', strokeWidth: 3 }} activeDot={{ r: 8, fill: color, stroke: isDarkMode ? '#1f2937' : '#fff', strokeWidth: 3 }} />
-                      </AreaChart>
-                    </ResponsiveContainer>
+      <AnimatePresence>
+        {showMeasurementHistory && (
+          <motion.div 
+            initial={{ opacity: 0, y: '100%' }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="absolute inset-0 z-[110] bg-gray-50 dark:bg-gray-900 flex flex-col transition-colors duration-300"
+          >
+            <header className="sticky top-0 z-40 bg-white dark:bg-gray-800 shadow-md px-4 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center shrink-0">
+              <h2 className="text-xl font-black dark:text-white tracking-tight">Historia pomiarów</h2>
+              <button onClick={() => setShowMeasurementHistory(false)} className="text-blue-500 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg text-sm cursor-pointer">Zamknij</button>
+            </header>
+            <div className="flex-1 overflow-y-auto p-4 space-y-5 pb-10">
+              {['weight', 'waist', 'biceps'].map(metric => {
+                const label = metric === 'weight' ? 'Waga (kg)' : metric === 'waist' ? 'Pas (cm)' : 'Biceps (cm)';
+                const color = metric === 'weight' ? '#2563eb' : metric === 'waist' ? '#16a34a' : '#dc2626';
+                const mData = [...measurements].reverse().filter(m => m[metric]).map((m, index) => ({ id: index, date: m.date.slice(0, 5), fullDate: m.date, value: parseFloat(m[metric].replace(',','.')) }));
+                if (mData.length === 0) return null;
+                return (
+                  <div key={metric} className="bg-white dark:bg-gray-800 p-5 rounded-3xl shadow-lg border border-gray-200 dark:border-gray-700">
+                    <h3 className="font-extrabold text-gray-800 dark:text-gray-100 mb-5 text-sm uppercase tracking-widest">{label}</h3>
+                    <div className="h-48 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={mData}>
+                          <defs><linearGradient id={`color${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={color} stopOpacity={0.5}/><stop offset="95%" stopColor={color} stopOpacity={0}/></linearGradient></defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#374151' : '#f3f4f6'} />
+                          <XAxis dataKey="id" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? '#9ca3af' : '#9ca3af', fontWeight: 'bold' }} tickFormatter={(id) => mData.find(d => d.id === id)?.date || ''} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? '#9ca3af' : '#9ca3af', fontWeight: 'bold' }} width={30} domain={['dataMin - 2', 'dataMax + 2']} />
+                          <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: isDarkMode ? '#1f2937' : '#ffffff', color: isDarkMode ? '#f3f4f6' : '#374151', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)' }} labelStyle={{ fontWeight: '900', marginBottom: '4px', textTransform: 'uppercase', fontSize: '10px', color: '#9ca3af', letterSpacing: '0.05em' }} labelFormatter={(id) => mData.find(d => d.id === id)?.fullDate || ''} formatter={(value) => [`${value}`, label.split(' ')[0]]} />
+                          <Area type="monotone" dataKey="value" stroke={color} strokeWidth={4} fillOpacity={1} fill={`url(#color${metric})`} dot={{ r: 5, fill: color, stroke: isDarkMode ? '#1f2937' : '#fff', strokeWidth: 3 }} activeDot={{ r: 8, fill: color, stroke: isDarkMode ? '#1f2937' : '#fff', strokeWidth: 3 }} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {showMeasurementModal && (
-        <div className="fixed inset-0 z-[120] bg-gray-50/90 dark:bg-gray-900/90 backdrop-blur-md flex flex-col justify-center items-center p-4 animate-fade-in-up">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 w-full max-w-sm flex flex-col gap-5">
-            <div className="flex justify-between items-center mb-1 border-b border-gray-100 dark:border-gray-700 pb-3">
-              <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">Nowy pomiar</h2>
-              <button onClick={() => setShowMeasurementModal(false)} className="text-gray-400 hover:text-red-500 font-bold text-xl px-2 cursor-pointer">✕</button>
+                );
+              })}
             </div>
-            <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Waga (kg)</label><input type="text" inputMode="decimal" value={measForm.weight} onChange={e => setMeasForm({...measForm, weight: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 82.5" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
-            <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Obwód pasa (cm)</label><input type="text" inputMode="decimal" value={measForm.waist} onChange={e => setMeasForm({...measForm, waist: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 86" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
-            <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Obwód bicepsa (cm)</label><input type="text" inputMode="decimal" value={measForm.biceps} onChange={e => setMeasForm({...measForm, biceps: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 38.5" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
-            
-            <button disabled={isSaving} onClick={handleSaveMeasurement} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all mt-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-              {isSaving ? 'Zapisywanie... ⏳' : 'Zapisz pomiar'}
-            </button>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {timerActive && activeTab !== 'workout' && !showExerciseModal && !showSummaryModal && !showMeasurementModal && !showMeasurementHistory && (
-         <RestTimer timeLeft={timeLeft} setTimeLeft={setTimeLeft} setTimerActive={setTimerActive} formatTime={formatTime} variant="compact" />
-      )}
-      
-      {showExerciseModal && (
-        <div className="fixed inset-0 z-[100] w-full max-w-md mx-auto bg-white dark:bg-gray-900 flex flex-col transition-colors duration-300 shadow-2xl">
-          <header className="sticky top-0 z-40 bg-white dark:bg-gray-800 shadow-md px-4 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center shrink-0">
-            <h2 className="text-xl font-black dark:text-white">Wybierz ćwiczenie</h2>
-            <button onClick={() => { setShowExerciseModal(false); setSearchQuery(''); setIsModalFilterOpen(false); }} className="text-blue-500 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg text-sm cursor-pointer">Zamknij</button>
-          </header>
-          
-          <div className="p-4 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 shrink-0 space-y-3 transition-colors duration-300 relative z-[110]">
-            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="🔍 Szukaj ćwiczenia..." className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-400 font-medium shadow-inner transition-colors" />
-            <div className="relative">
-              <div onClick={() => setIsModalFilterOpen(!isModalFilterOpen)} className="w-full bg-gradient-to-r from-gray-100 to-white dark:from-gray-800 dark:to-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl p-3 flex justify-between items-center cursor-pointer shadow-sm hover:shadow-md transition-all font-bold">
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">{selectedMuscleFilter === 'Wszystkie' ? 'Wszystkie partie mięśniowe' : selectedMuscleFilter}</span>
-                <span className={`text-xs text-gray-500 transition-transform duration-300 ${isModalFilterOpen ? 'rotate-180' : ''}`}>▼</span>
+      <AnimatePresence>
+        {showMeasurementModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] bg-gray-50/90 dark:bg-gray-900/90 backdrop-blur-md flex flex-col justify-center items-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', bounce: 0.5 }}
+              className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 w-full max-w-sm flex flex-col gap-5"
+            >
+              <div className="flex justify-between items-center mb-1 border-b border-gray-100 dark:border-gray-700 pb-3">
+                <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">Nowy pomiar</h2>
+                <button onClick={() => setShowMeasurementModal(false)} className="text-gray-400 hover:text-red-500 font-bold text-xl px-2 cursor-pointer">✕</button>
               </div>
-              {isModalFilterOpen && (
-                <><div className="fixed inset-0 z-[115]" onClick={() => setIsModalFilterOpen(false)}></div>
-                  <div className="absolute top-full left-0 w-full mt-2 bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl border border-gray-100 dark:border-gray-700 rounded-2xl shadow-[0_20px_50px_rgba(8,_112,_184,_0.2)] dark:shadow-[0_20px_50px_rgba(0,_0,_0,_0.5)] z-[120] overflow-hidden animate-fade-in-up p-2 flex flex-col gap-1.5 max-h-64 overflow-y-auto custom-scrollbar">
-                    {MUSCLE_GROUPS.map(g => {
-                      const isActive = selectedMuscleFilter === g;
-                      return (
-                        <div key={g} onClick={() => { setSelectedMuscleFilter(g); setIsModalFilterOpen(false); }} className={`flex items-center justify-between px-4 py-3 text-sm font-bold cursor-pointer transition-all duration-300 rounded-xl border ${isActive ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 shadow-sm' : 'bg-white/50 dark:bg-gray-800/50 text-gray-600 dark:text-gray-300 border-transparent hover:bg-white dark:hover:bg-gray-800 shadow-sm'}`}>
-                          <span>{g === 'Wszystkie' ? 'Wszystkie partie mięśniowe' : g}</span>{isActive && <span className="text-blue-500 dark:text-blue-400 text-lg leading-none">✓</span>}
-                        </div>
-                      )
-                    })}
+              <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Waga (kg)</label><input type="text" inputMode="decimal" value={measForm.weight} onChange={e => setMeasForm({...measForm, weight: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 82.5" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
+              <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Obwód pasa (cm)</label><input type="text" inputMode="decimal" value={measForm.waist} onChange={e => setMeasForm({...measForm, waist: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 86" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
+              <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Obwód bicepsa (cm)</label><input type="text" inputMode="decimal" value={measForm.biceps} onChange={e => setMeasForm({...measForm, biceps: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 38.5" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
+              
+              <button disabled={isSaving} onClick={handleSaveMeasurement} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all mt-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                {isSaving ? 'Zapisywanie... ⏳' : 'Zapisz pomiar'}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {shouldShowSmartWidget && (
+          <motion.div 
+            initial={{ y: 150, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 150, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            onClick={() => {
+              if (activeTab !== 'workout') setActiveTab('workout');
+            }}
+            className="absolute bottom-20 left-4 right-4 z-[90] bg-blue-600 dark:bg-blue-700 rounded-2xl p-4 shadow-[0_10px_25px_rgba(37,99,235,0.4)] flex items-center justify-between cursor-pointer border border-blue-400 dark:border-blue-500 overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-white/10 w-1/3 skew-x-12 -translate-x-full animate-[shimmer_2s_infinite]"></div>
+            <div className="flex items-center gap-3 relative z-10">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black transition-colors ${timerActive ? 'bg-yellow-400 text-yellow-900 animate-pulse' : 'bg-white/20 text-white'}`}>
+                {timerActive ? '⏳' : '💪'}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-white font-bold text-sm leading-tight">
+                  {timerActive ? 'Czas przerwy...' : 'Trening w toku'}
+                </span>
+                <span className="text-blue-100 font-medium text-xs">
+                  {timerActive ? (activeTab === 'workout' ? 'Odpocznij chwilę (scrolluj śmiało)' : 'Wróć do treningu') : 'Trwa od ' + formatTime(elapsedTime)}
+                </span>
+              </div>
+            </div>
+            <div className={`text-2xl font-black text-white relative z-10 tabular-nums ${timerActive && timeLeft <= 10 ? 'text-red-300 animate-bounce' : ''}`}>
+              {timerActive ? formatTime(timeLeft) : formatTime(elapsedTime)}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      <AnimatePresence>
+        {showExerciseModal && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[100] w-full max-w-md mx-auto bg-white dark:bg-gray-900 flex flex-col shadow-2xl"
+          >
+            <header className="sticky top-0 z-40 bg-white dark:bg-gray-800 shadow-md px-4 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center shrink-0">
+              <h2 className="text-xl font-black dark:text-white">Wybierz ćwiczenie</h2>
+              <button onClick={() => { setShowExerciseModal(false); setSearchQuery(''); setIsModalFilterOpen(false); }} className="text-blue-500 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg text-sm cursor-pointer">Zamknij</button>
+            </header>
+            
+            <div className="p-4 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 shrink-0 space-y-3 transition-colors duration-300 relative z-[110]">
+              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="🔍 Szukaj ćwiczenia..." className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-400 font-medium shadow-inner transition-colors" />
+              <div className="relative">
+                <div onClick={() => setIsModalFilterOpen(!isModalFilterOpen)} className="w-full bg-gradient-to-r from-gray-100 to-white dark:from-gray-800 dark:to-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl p-3 flex justify-between items-center cursor-pointer shadow-sm hover:shadow-md transition-all font-bold">
+                  <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">{selectedMuscleFilter === 'Wszystkie' ? 'Wszystkie partie mięśniowe' : selectedMuscleFilter}</span>
+                  <span className={`text-xs text-gray-500 transition-transform duration-300 ${isModalFilterOpen ? 'rotate-180' : ''}`}>▼</span>
+                </div>
+                {isModalFilterOpen && (
+                  <><div className="fixed inset-0 z-[115]" onClick={() => setIsModalFilterOpen(false)}></div>
+                    <div className="absolute top-full left-0 w-full mt-2 bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl border border-gray-100 dark:border-gray-700 rounded-2xl shadow-[0_20px_50px_rgba(8,_112,_184,_0.2)] dark:shadow-[0_20px_50px_rgba(0,_0,_0,_0.5)] z-[120] overflow-hidden animate-fade-in-up p-2 flex flex-col gap-1.5 max-h-64 overflow-y-auto custom-scrollbar">
+                      {MUSCLE_GROUPS.map(g => {
+                        const isActive = selectedMuscleFilter === g;
+                        return (
+                          <div key={g} onClick={() => { setSelectedMuscleFilter(g); setIsModalFilterOpen(false); }} className={`flex items-center justify-between px-4 py-3 text-sm font-bold cursor-pointer transition-all duration-300 rounded-xl border ${isActive ? 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 shadow-sm' : 'bg-white/50 dark:bg-gray-800/50 text-gray-600 dark:text-gray-300 border-transparent hover:bg-white dark:hover:bg-gray-800 shadow-sm'}`}>
+                            <span>{g === 'Wszystkie' ? 'Wszystkie partie mięśniowe' : g}</span>{isActive && <span className="text-blue-500 dark:text-blue-400 text-lg leading-none">✓</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 pb-6 relative z-[90] bg-gray-50 dark:bg-gray-900 flex flex-col gap-3">
+              {filteredExercises.map(ex => (
+                <div key={ex.id} className="w-full p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm flex justify-between items-center transition-all duration-300 animate-fade-in-up">
+                  <div className="flex flex-col flex-1" onClick={() => addExercise(ex)}>
+                    <span className="font-bold text-gray-900 dark:text-white text-base">{ex.name}</span>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-900/30 px-2.5 py-1 rounded-lg mt-2 w-max border border-indigo-100 dark:border-indigo-800/50">{ex.target}</span>
                   </div>
-                </>
+                  <button onClick={() => addExercise(ex)} className="w-8 h-8 rounded-full bg-gray-900 dark:bg-black border border-gray-700 shadow-inner flex items-center justify-center text-white hover:bg-blue-600 hover:border-blue-500 transition-all duration-300 cursor-pointer shrink-0 ml-2">
+                    <span className="text-xl font-black leading-none pb-0.5">+</span>
+                  </button>
+                </div>
+              ))}
+              {filteredExercises.length === 0 && (
+                <div className="p-8 text-center text-gray-400 dark:text-gray-500 font-medium bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 border-dashed mt-4">Nie znaleziono ćwiczeń spełniających kryteria.</div>
               )}
             </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 pb-6 relative z-[90] bg-gray-50 dark:bg-gray-900 flex flex-col gap-3">
-            {filteredExercises.map(ex => (
-              <div key={ex.id} className="w-full p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm flex justify-between items-center transition-all duration-300 animate-fade-in-up">
-                <div className="flex flex-col flex-1" onClick={() => addExercise(ex)}>
-                  <span className="font-bold text-gray-900 dark:text-white text-base">{ex.name}</span>
-                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-900/30 px-2.5 py-1 rounded-lg mt-2 w-max border border-indigo-100 dark:border-indigo-800/50">{ex.target}</span>
-                </div>
-                <button onClick={() => addExercise(ex)} className="w-8 h-8 rounded-full bg-gray-900 dark:bg-black border border-gray-700 shadow-inner flex items-center justify-center text-white hover:bg-blue-600 hover:border-blue-500 transition-all duration-300 cursor-pointer shrink-0 ml-2">
-                  <span className="text-xl font-black leading-none pb-0.5">+</span>
-                </button>
-              </div>
-            ))}
-            {filteredExercises.length === 0 && (
-              <div className="p-8 text-center text-gray-400 dark:text-gray-500 font-medium bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 border-dashed mt-4">Nie znaleziono ćwiczeń spełniających kryteria.</div>
-            )}
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {!showExerciseModal && !showSummaryModal && !showMeasurementHistory && <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />}
     </div>
