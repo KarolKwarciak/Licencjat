@@ -36,10 +36,10 @@ export default function WorkoutTab({
   showConfirmationModal,
   moveExercise,
   setIsInlineTimerVisible,
-  // Z FAZY 3/4: Funkcje do obsługi kliknięcia w tytuł
   setSelectedExerciseDetail,
   setExerciseSubTab,
-  setActiveTab
+  setActiveTab,
+  adjustTimer // NOWY PROP
 }) {
 
   const timerRef = useRef(null);
@@ -172,7 +172,6 @@ export default function WorkoutTab({
                 <div className="absolute -left-10 -top-10 w-40 h-40 bg-blue-500/5 dark:bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
                 <div className="flex justify-between items-start mb-5 relative z-10 px-1 pt-1">
                   
-                  {/* NOWOŚĆ: KLIKALNY TYTUŁ ĆWICZENIA (przenosi do Historii w bazie) */}
                   <h2 
                     className="font-extrabold text-blue-600 dark:text-blue-400 text-xl pr-2 tracking-tight flex-1 cursor-pointer hover:underline flex items-center gap-1.5"
                     onClick={() => {
@@ -258,7 +257,15 @@ export default function WorkoutTab({
                           ref={timerSource?.exercise === eIndex && timerSource?.set === sIndex ? timerRef : null}
                         >
                           <div className="overflow-hidden">
-                            <RestTimer timeLeft={timeLeft} setTimeLeft={setTimeLeft} setTimerActive={setTimerActive} formatTime={formatTime} variant="inline" />
+                            {/* PRZEKAZUJEMY ADJUST TIMER */}
+                            <RestTimer 
+                              timeLeft={timeLeft} 
+                              setTimeLeft={setTimeLeft} 
+                              setTimerActive={setTimerActive} 
+                              formatTime={formatTime} 
+                              variant="inline" 
+                              adjustTimer={adjustTimer}
+                            />
                           </div>
                         </div>
                       </div>

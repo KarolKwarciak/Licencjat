@@ -4,19 +4,16 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { EXERCISES_DB } from './data/exercises'
 import { supabase } from './supabaseClient'
 
-// Importujemy nasze wydzielone komponenty
 import BottomNav from './components/BottomNav'
 import RestTimer from './components/RestTimer'
 import Auth from './components/Auth'
 
-// Importujemy widoki z nowego folderu 'views'
 import HistoryTabRaw from './views/HistoryTab'
 import ExercisesTabRaw from './views/ExercisesTab'
 import WorkoutTab from './views/WorkoutTab' 
 import CalendarTabRaw from './views/CalendarTab'
 import ProfileTabRaw from './views/ProfileTab'
 
-// Optymalizacja re-renderów przy użyciu React.memo
 const HistoryTab = memo(HistoryTabRaw)
 const ExercisesTab = memo(ExercisesTabRaw)
 const CalendarTab = memo(CalendarTabRaw)
@@ -30,7 +27,6 @@ function App() {
   const [loadingData, setLoadingData] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   
-  // --- SYSTEM TOASTÓW ---
   const [toast, setToast] = useState(null); 
   const showToast = (message, type = 'info') => setToast({ message, type });
 
@@ -41,13 +37,11 @@ function App() {
     }
   }, [toast])
 
-  // --- SYSTEM MODALI ---
   const [confirmModal, setConfirmModal] = useState(null);
   const showConfirmationModal = (message, onConfirm, confirmText = 'Zatwierdź', cancelText = 'Anuluj', onCancel = null) => {
     setConfirmModal({ message, onConfirm, confirmText, cancelText, onCancel });
   }
 
-  // --- STANY APLIKACJI Z AUTO-SAVEM W LOCALSTORAGE ---
   const [isWorkoutActive, setIsWorkoutActive] = useState(() => JSON.parse(localStorage.getItem('fitApp_isWorkoutActive')) || false)
   const [currentWorkout, setCurrentWorkout] = useState(() => JSON.parse(localStorage.getItem('fitApp_currentWorkout')) || [])
   const [workoutStartTime, setWorkoutStartTime] = useState(() => JSON.parse(localStorage.getItem('fitApp_workoutStartTime')) || null)
@@ -61,7 +55,6 @@ function App() {
   const [defaultRestTime, setDefaultRestTime] = useState(180) 
   const [isInlineTimerVisible, setIsInlineTimerVisible] = useState(true)
 
-  // EFEKT ZAPISUJĄCY TRENING W TLE
   useEffect(() => {
     localStorage.setItem('fitApp_isWorkoutActive', JSON.stringify(isWorkoutActive));
     localStorage.setItem('fitApp_currentWorkout', JSON.stringify(currentWorkout));
@@ -111,14 +104,12 @@ function App() {
 
   const allTemplates = [...customTemplates]
 
-  // --- EFEKTY POBIERANIA DANYCH I SESJI ---
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session))
     return () => subscription.unsubscribe()
   }, [])
 
-  // BEZPIECZNE ŁADOWANIE WŁASNYCH ĆWICZEŃ Z LOCAL STORAGE
   useEffect(() => {
     let savedExercises = null;
     if (session?.user?.id) {
@@ -132,7 +123,6 @@ function App() {
     }
   }, [session?.user?.id])
 
-  // POBIERANIE Z CHMURY + PANCERNY AUTO-SYNC
   useEffect(() => {
     if (!session?.user?.id) return;
     const uid = session.user.id;
@@ -140,25 +130,20 @@ function App() {
     const fetchCloudData = async () => {
       setLoadingData(true);
       try {
-        // KROK 1: Czytamy co mamy na telefonie
         const localHistoryStr = localStorage.getItem(`fitAppHistory_${uid}`);
         const localHistory = localHistoryStr ? JSON.parse(localHistoryStr) : [];
 
-        // KROK 2: Pobieramy historię z chmury
         const { data: cloudWorkouts, error: wError } = await supabase.from('workouts').select('*').order('id', { ascending: false });
         if (wError) throw wError;
 
         if (cloudWorkouts) {
-          // KROK 3: Szukamy niezsynchronizowanych treningów (w telefonie są, w chmurze brak)
           const cloudIds = new Set(cloudWorkouts.map(w => String(w.id)));
           const unsyncedWorkouts = localHistory.filter(w => !cloudIds.has(String(w.id)));
 
-          // KROK 4: Wypychamy je do chmury (Auto-Sync)
           if (unsyncedWorkouts.length > 0) {
             const { error: syncError } = await supabase.from('workouts').upsert(unsyncedWorkouts);
             if (!syncError) {
               showToast(`Zsynchronizowano ${unsyncedWorkouts.length} trening(i) z chmurą! ☁️`, "success");
-              // Dodajemy je wizualnie do załadowanej tablicy
               cloudWorkouts.unshift(...unsyncedWorkouts);
               cloudWorkouts.sort((a, b) => b.id - a.id);
             }
@@ -189,7 +174,6 @@ function App() {
         }
       } catch (err) {
         console.error("Błąd sieci:", err);
-        // Fallback w przypadku absolutnego braku neta - ładuje dane z pamięci
         const savedHistory = localStorage.getItem(`fitAppHistory_${uid}`)
         if (savedHistory) setWorkoutHistory(JSON.parse(savedHistory))
         const savedTemplates = localStorage.getItem(`fitAppTemplates_${uid}`)
@@ -210,6 +194,29 @@ function App() {
     if (savedTheme === 'dark') { setIsDarkMode(true); document.documentElement.classList.add('dark'); }
   }, [])
 
+  // --- ZABEZPIECZENIE: Zablokuj usypianie ekranu podczas treningu! ---
+  useEffect(() => {
+    let wakeLockObj = null;
+    const requestWakeLock = async () => {
+      if (isWorkoutActive && 'wakeLock' in navigator && document.visibilityState === 'visible') {
+        try {
+          wakeLockObj = await navigator.wakeLock.request('screen');
+        } catch (err) {
+          console.log("Wake Lock nieudany:", err);
+        }
+      }
+    };
+
+    requestWakeLock();
+    const handleVisibilityChange = () => { if (document.visibilityState === 'visible') requestWakeLock(); };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockObj !== null) wakeLockObj.release().catch(() => {});
+    };
+  }, [isWorkoutActive]);
+
   // --- STOPER OPARTY O TIMESTAMPY Z POWIADOMIENIAMI ---
   useEffect(() => {
     let interval = null;
@@ -224,6 +231,14 @@ function App() {
           setTimerTarget(null);
           clearInterval(interval);
           if ('vibrate' in navigator) navigator.vibrate([200, 100, 200, 100, 400]);
+          
+          // --- POWIADOMIENIE SYSTEMOWE PO ZAKOŃCZENIU PRZERWY ---
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification("Koniec przerwy! 🚨", {
+              body: "Czas na kolejną serię. Wracaj do roboty!",
+              vibrate: [200, 100, 200, 100, 400]
+            });
+          }
         }
       }, 500);
     }
@@ -236,18 +251,24 @@ function App() {
     return () => clearInterval(interval)
   }, [isWorkoutActive, workoutStartTime])
 
+  // --- FUNKCJA ZARZĄDZAJĄCA PRZYCISKAMI +/- W STOPERZE ---
+  const adjustTimer = (amountInSeconds) => {
+    if (timerTarget) {
+      setTimerTarget(prev => prev + amountInSeconds * 1000);
+      setTimeLeft(prev => prev + amountInSeconds);
+    }
+  };
+
   const toggleTheme = () => {
     if (isDarkMode) { document.documentElement.classList.remove('dark'); localStorage.setItem('fitAppTheme', 'light'); setIsDarkMode(false); }
     else { document.documentElement.classList.add('dark'); localStorage.setItem('fitAppTheme', 'dark'); setIsDarkMode(true); }
   }
 
-  // INTELIGENTNA LISTA ĆWICZEŃ (Auto-Recovery z historii)
   const allExercises = useMemo(() => {
     const baseList = [...EXERCISES_DB, ...customExercises];
     const existingNames = new Set(baseList.map(e => e.name.toLowerCase().trim()));
     const recoveredExercises = [];
 
-    // Przeszukuje całą historię treningów, żeby upewnić się, że żadne użyte ćwiczenie nie zniknęło
     workoutHistory.forEach(workout => {
       workout.exercises.forEach(ex => {
         const exName = ex.name.toLowerCase().trim();
@@ -267,7 +288,6 @@ function App() {
   }, [customExercises, workoutHistory]);
 
 
-  // --- ZARZĄDZANIE DANYMI ---
   const handleSaveMeasurement = async () => {
     if (!measForm.weight && !measForm.waist && !measForm.biceps) return showToast("Wpisz przynajmniej jedną wartość!", "error");
     setIsSaving(true); 
@@ -314,12 +334,21 @@ function App() {
     return `${m}:${s < 10 ? '0' : ''}${s}`
   }
 
+  // --- PROŚBA O ZGODĘ NA POWIADOMIENIA PUSH ---
+  const requestNotificationPermission = () => {
+    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+  };
+
   const startWorkout = () => {
+    requestNotificationPermission(); // Prosi o zgodę przy rozpoczęciu pierwszego treningu
     setEditingWorkoutId(null); setIsWorkoutActive(true); setTimerSource(null); 
     setTimerTarget(null); setTimerActive(false); setWorkoutStartTime(Date.now()); setElapsedTime(0);
   }
 
   const startWorkoutFromTemplate = (template) => {
+    requestNotificationPermission();
     setEditingWorkoutId(null); setCurrentWorkout(JSON.parse(JSON.stringify(template.exercises))); 
     setIsWorkoutActive(true); setTimerSource(null); setTimerTarget(null); setTimerActive(false); 
     setWorkoutStartTime(Date.now()); setElapsedTime(0);
@@ -1009,6 +1038,7 @@ function App() {
             setSelectedExerciseDetail={setSelectedExerciseDetail}
             setExerciseSubTab={setExerciseSubTab}
             setActiveTab={setActiveTab}
+            adjustTimer={adjustTimer}
           />
         )}
 
@@ -1135,7 +1165,8 @@ function App() {
             onClick={() => {
               if (activeTab !== 'workout') setActiveTab('workout');
             }}
-            className="absolute bottom-20 left-4 right-4 z-[90] bg-blue-600 dark:bg-blue-700 rounded-2xl p-4 shadow-[0_10px_25px_rgba(37,99,235,0.4)] flex items-center justify-between cursor-pointer border border-blue-400 dark:border-blue-500 overflow-hidden"
+            /* UWAGA: TUTAJ WIDGET ZMIENIONY NA FIXED I ZACENTROWANY - NIE BĘDZIE SIĘ ROZCIĄGAŁ! */
+            className="fixed bottom-20 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-[calc(28rem-2rem)] z-[90] bg-blue-600 dark:bg-blue-700 rounded-2xl p-4 shadow-[0_10px_25px_rgba(37,99,235,0.4)] flex items-center justify-between cursor-pointer border border-blue-400 dark:border-blue-500 overflow-hidden"
           >
             <div className="absolute inset-0 bg-white/10 w-1/3 skew-x-12 -translate-x-full animate-[shimmer_2s_infinite]"></div>
             <div className="flex items-center gap-3 relative z-10">
