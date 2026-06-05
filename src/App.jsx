@@ -50,12 +50,15 @@ function App() {
     setConfirmModal({ message, onConfirm, confirmText, cancelText, onCancel });
   }
 
-  // --- STANY APLIKACJI ---
+  // --- STANY APLIKACJI Z AUTO-SAVEM ---
   const [isWorkoutActive, setIsWorkoutActive] = useState(() => JSON.parse(localStorage.getItem('fitApp_isWorkoutActive')) || false)
   const [currentWorkout, setCurrentWorkout] = useState(() => JSON.parse(localStorage.getItem('fitApp_currentWorkout')) || [])
   const [workoutStartTime, setWorkoutStartTime] = useState(() => JSON.parse(localStorage.getItem('fitApp_workoutStartTime')) || null)
   const [elapsedTime, setElapsedTime] = useState(() => JSON.parse(localStorage.getItem('fitApp_elapsedTime')) || 0)
   const [editingWorkoutId, setEditingWorkoutId] = useState(() => JSON.parse(localStorage.getItem('fitApp_editingWorkoutId')) || null)
+  
+  // NOWY STAN ŚLEDZĄCY POCHODZENIE TRENINGU Z SZABLONU
+  const [sourceTemplateId, setSourceTemplateId] = useState(() => JSON.parse(localStorage.getItem('fitApp_sourceTemplateId')) || null)
 
   const [timerActive, setTimerActive] = useState(() => JSON.parse(localStorage.getItem('fitApp_timerActive')) || false)
   const [timerTarget, setTimerTarget] = useState(() => JSON.parse(localStorage.getItem('fitApp_timerTarget')) || null)
@@ -73,7 +76,8 @@ function App() {
     localStorage.setItem('fitApp_timerActive', JSON.stringify(timerActive));
     localStorage.setItem('fitApp_timerTarget', JSON.stringify(timerTarget));
     localStorage.setItem('fitApp_timerSource', JSON.stringify(timerSource));
-  }, [isWorkoutActive, currentWorkout, workoutStartTime, elapsedTime, editingWorkoutId, timerActive, timerTarget, timerSource]);
+    localStorage.setItem('fitApp_sourceTemplateId', JSON.stringify(sourceTemplateId));
+  }, [isWorkoutActive, currentWorkout, workoutStartTime, elapsedTime, editingWorkoutId, timerActive, timerTarget, timerSource, sourceTemplateId]);
 
 
   const [workoutHistory, setWorkoutHistory] = useState([])
@@ -93,7 +97,7 @@ function App() {
 
   const [customTemplates, setCustomTemplates] = useState([])
   const [isCreatingTemplate, setIsCreatingTemplate] = useState(false)
-  const [editingTemplateId, setEditingTemplateId] = useState(null) // <--- NOWY STAN DO EDYCJI SZABLONU
+  const [editingTemplateId, setEditingTemplateId] = useState(null) 
   const [newTemplateName, setNewTemplateName] = useState('')
   const [newTemplateExercises, setNewTemplateExercises] = useState([])
 
@@ -347,6 +351,7 @@ function App() {
     }
   }
 
+  // --- BRAKUJĄCA FUNKCJA DODANA TUTAJ ---
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = seconds % 60;
     if (h > 0) return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`
@@ -355,26 +360,28 @@ function App() {
 
   const startWorkout = () => {
     try { LocalNotifications.requestPermissions(); } catch(e){}
-    setEditingWorkoutId(null); setIsWorkoutActive(true); setTimerSource(null); 
+    setEditingWorkoutId(null); setSourceTemplateId(null); setIsWorkoutActive(true); setTimerSource(null); 
     setTimerTarget(null); setTimerActive(false); setWorkoutStartTime(Date.now()); setElapsedTime(0);
   }
 
   const startWorkoutFromTemplate = (template) => {
     try { LocalNotifications.requestPermissions(); } catch(e){}
-    setEditingWorkoutId(null); setCurrentWorkout(JSON.parse(JSON.stringify(template.exercises))); 
+    setEditingWorkoutId(null);
+    setSourceTemplateId(template.id);
+    setCurrentWorkout(JSON.parse(JSON.stringify(template.exercises))); 
     setIsWorkoutActive(true); setTimerSource(null); setTimerTarget(null); setTimerActive(false); 
     setWorkoutStartTime(Date.now()); setElapsedTime(0);
   }
 
   const clearAutoSave = () => {
-    ['fitApp_isWorkoutActive', 'fitApp_currentWorkout', 'fitApp_workoutStartTime', 'fitApp_elapsedTime', 'fitApp_editingWorkoutId', 'fitApp_timerActive', 'fitApp_timerTarget', 'fitApp_timerSource'].forEach(k => localStorage.removeItem(k));
+    ['fitApp_isWorkoutActive', 'fitApp_currentWorkout', 'fitApp_workoutStartTime', 'fitApp_elapsedTime', 'fitApp_editingWorkoutId', 'fitApp_timerActive', 'fitApp_timerTarget', 'fitApp_timerSource', 'fitApp_sourceTemplateId'].forEach(k => localStorage.removeItem(k));
   };
 
   const cancelWorkout = () => {
     const msg = editingWorkoutId ? 'Czy chcesz porzucić edycję tego treningu?' : 'Czy na pewno chcesz anulować trening? Postęp zostanie utracony.';
     showConfirmationModal(msg, () => {
       setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setTimerTarget(null);
-      setEditingWorkoutId(null); setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0);
+      setEditingWorkoutId(null); setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0); setSourceTemplateId(null);
       try { LocalNotifications.cancel({ notifications: [{ id: 777 }] }); } catch(e){}
       clearAutoSave();
     });
@@ -470,11 +477,6 @@ function App() {
     setWorkoutHistory(updatedHistory);
     if(uid) localStorage.setItem(`fitAppHistory_${uid}`, JSON.stringify(updatedHistory));
 
-    setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setTimerTarget(null);
-    setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0); setActiveSetMenu(null);
-    try { LocalNotifications.cancel({ notifications: [{ id: 777 }] }); } catch(e){}
-    clearAutoSave();
-
     if (uid && finalWorkoutObj) {
       setIsSaving(true);
       try {
@@ -491,6 +493,52 @@ function App() {
         setIsSaving(false);
       }
     }
+
+    // --- PODZIAŁ LOGIKI NA PYTANIE O ZMIANY W SZABLONIE ---
+    if (sourceTemplateId) {
+      const currentTemplate = customTemplates.find(t => t.id === sourceTemplateId);
+      if (currentTemplate) {
+        showConfirmationModal(
+          `Wykryto trening z planu. Czy chcesz zaktualizować szablon "${currentTemplate.name}" o zmiany wprowadzone podczas dzisiejszych serii?`,
+          async () => {
+            const updatedTemplateExercises = finalWorkoutData.map(ex => ({
+              id: ex.id,
+              name: ex.name,
+              target: ex.target,
+              description: ex.description || '',
+              sets: ex.sets.map(s => ({ weight: '', reps: s.reps, type: s.type, isCompleted: false }))
+            }));
+
+            const updatedTemplates = customTemplates.map(t => t.id === sourceTemplateId ? { ...t, exercises: updatedTemplateExercises } : t);
+            setCustomTemplates(updatedTemplates);
+
+            if (uid) {
+              localStorage.setItem(`fitAppTemplates_${uid}`, JSON.stringify(updatedTemplates));
+              if (navigator.onLine) {
+                await supabase.from('templates').update({ exercises: updatedTemplateExercises }).eq('id', sourceTemplateId);
+              }
+            }
+            showToast("Szablon został potężnie zaktualizowany! 📋", "success");
+            finalizeWorkoutFlow(finalWorkoutObj, finalWorkoutData, newPRsCount, workoutVolume, summaryExercisesList);
+          },
+          'Tak, uaktualnij',
+          'Nie, zostaw stary',
+          () => {
+            finalizeWorkoutFlow(finalWorkoutObj, finalWorkoutData, newPRsCount, workoutVolume, summaryExercisesList);
+          }
+        );
+        return; 
+      }
+    }
+
+    finalizeWorkoutFlow(finalWorkoutObj, finalWorkoutData, newPRsCount, workoutVolume, summaryExercisesList);
+  }
+
+  const finalizeWorkoutFlow = (finalWorkoutObj, finalWorkoutData, newPRsCount, workoutVolume, summaryExercisesList) => {
+    setIsWorkoutActive(false); setCurrentWorkout([]); setTimerActive(false); setTimerTarget(null);
+    setTimerSource(null); setWorkoutStartTime(null); setElapsedTime(0); setActiveSetMenu(null); setSourceTemplateId(null);
+    try { LocalNotifications.cancel({ notifications: [{ id: 777 }] }); } catch(e){}
+    clearAutoSave();
 
     if (!editingWorkoutId) {
       setShowSummaryModal({ 
@@ -545,7 +593,6 @@ function App() {
     setNewExName(''); setNewExDescription(''); setShowCreateExercise(false); showToast("Własne ćwiczenie utworzone!", "success");
   }
 
-  // --- LOGIKA ZAPISU I EDYCJI SZABLONU ---
   const handleSaveTemplate = async () => {
     if (!newTemplateName.trim()) return showToast('Wpisz nazwę szablonu!', 'error');
     if (newTemplateExercises.length === 0) return showToast('Dodaj przynajmniej jedno ćwiczenie!', 'error');
@@ -587,10 +634,7 @@ function App() {
         }
       }
       
-      setNewTemplateName(''); 
-      setNewTemplateExercises([]); 
-      setIsCreatingTemplate(false);
-      setEditingTemplateId(null);
+      setNewTemplateName(''); setNewTemplateExercises([]); setIsCreatingTemplate(false); setEditingTemplateId(null);
     } catch (err) {
       showToast("Wystąpił błąd zapisu.", "error");
     } finally {
@@ -646,8 +690,8 @@ function App() {
     newWorkout[eIndex].sets[sIndex].isCompleted = isNowCompleted; setCurrentWorkout(newWorkout);
     
     if (isNowCompleted) { 
-      const setType = newWorkout[eIndex].sets[sIndex].type;
-      const isWarmup = setType === 'warm-up' || setType === 'W'; 
+      const setType = String(newWorkout[eIndex].sets[sIndex].type).toLowerCase().trim();
+      const isWarmup = setType === 'warm-up' || setType === 'w' || setType === 'rozgrzewka'; 
       const restTimeSeconds = isWarmup ? 60 : defaultRestTime;
 
       const targetTimestamp = Date.now() + restTimeSeconds * 1000;
@@ -949,7 +993,6 @@ function App() {
             {activeTab === 'exercises' && (selectedExerciseDetail ? 'Szczegóły' : 'Baza ćwiczeń')}
             {activeTab === 'workout' && !isWorkoutActive && !isCreatingTemplate && 'Trening'}
             {activeTab === 'workout' && isWorkoutActive && (editingWorkoutId ? 'Edycja' : 'Trwa trening')}
-            {/* ZMIENIONY TYTUŁ PRZY EDYCJI SZABLONU */}
             {activeTab === 'workout' && isCreatingTemplate && (editingTemplateId ? 'Edycja szablonu' : 'Nowy szablon')}
             {activeTab === 'calendar' && 'Twój Rok'}
             {activeTab === 'profile' && 'Profil'}
@@ -1138,8 +1181,8 @@ function App() {
             setExerciseSubTab={setExerciseSubTab}
             setActiveTab={setActiveTab}
             adjustTimer={adjustTimer}
-            handleEditTemplate={handleEditTemplate} // <--- PRZEKAZUJEMY FUNKCJĘ EDYCJI
-            setEditingTemplateId={setEditingTemplateId} // <--- PRZEKAZUJEMY FUNKCJĘ CZYSZCZENIA EDYCJI
+            handleEditTemplate={handleEditTemplate} 
+            setEditingTemplateId={setEditingTemplateId} 
           />
         )}
 

@@ -213,13 +213,6 @@ const WorkoutTabRaw = ({
   // WIDOK 3: AKTYWNY TRENING
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4 pb-20 flex flex-col">
-      <AnimatePresence>
-        {timerActive && (
-          <motion.div id="inline-timer" initial={{ opacity: 0, height: 0, scale: 0.9 }} animate={{ opacity: 1, height: 'auto', scale: 1 }} exit={{ opacity: 0, height: 0, scale: 0.9 }} transition={{ type: 'spring', bounce: 0.4 }} className="origin-top relative z-10 w-full rounded-2xl overflow-hidden shadow-lg border border-blue-400/20">
-            <RestTimer timeLeft={timeLeft} formatTime={formatTime} adjustTimer={adjustTimer} skipTimer={() => { setTimerActive(false); setTimerTarget(null); setTimerSource(null); }} />
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {currentWorkout.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 my-4">
@@ -267,36 +260,66 @@ const WorkoutTabRaw = ({
                 const isWarmup = set.type === 'warm-up' || set.type === 'W';
                 const isDrop = set.type === 'drop' || set.type === 'D';
 
-                return (
-                  <div key={sIndex} className={`flex gap-2 items-center p-2 rounded-xl relative transition-all duration-300 ${set.isCompleted ? 'bg-green-50/50 dark:bg-green-900/10 border border-green-200 dark:border-green-800/50' : isWarmup ? 'bg-orange-50/50 dark:bg-orange-900/10 border border-orange-100 dark:border-orange-800/30' : isDrop ? 'bg-purple-50/50 dark:bg-purple-900/10 border border-purple-100 dark:border-purple-800/30' : 'bg-gray-50 dark:bg-gray-700/30 border border-gray-100 dark:border-gray-700/50'}`}>
-                    
-                    <button onClick={() => setActiveSetMenu(isActiveMenu ? null : {eIndex, sIndex})} className={`w-7 h-7 flex items-center justify-center rounded-lg font-black text-xs transition-colors shadow-sm ${isWarmup ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400' : isDrop ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400' : 'bg-white dark:bg-gray-600 text-gray-500 dark:text-gray-300 border border-gray-200 dark:border-gray-500'}`}>
-                      {isWarmup ? 'W' : isDrop ? 'D' : sIndex + 1}
-                    </button>
+                // --- Szukanie poprzedniego wyniku ---
+                let prevW = "-"; let prevR = "-";
+                const pastWk = workoutHistory.find(w => w.id !== editingWorkoutId && w.exercises.some(e => e.name === exercise.name));
+                if (pastWk) {
+                  const pEx = pastWk.exercises.find(e => e.name === exercise.name);
+                  if (pEx && pEx.sets[sIndex]) {
+                    prevW = pEx.sets[sIndex].weight ? `${pEx.sets[sIndex].weight}` : "-";
+                    prevR = pEx.sets[sIndex].reps ? `${pEx.sets[sIndex].reps}` : "-";
+                  }
+                }
 
-                    <div className="flex-1 flex gap-2">
-                      <input type="text" inputMode="decimal" className={`w-full rounded-lg p-2 text-center font-black text-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm ${set.isCompleted ? 'bg-transparent text-green-700 dark:text-green-400' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-600'}`} value={set.weight} onChange={(e) => updateSet(eIndex, sIndex, 'weight', e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.'))} readOnly={set.isCompleted} placeholder="-" />
-                      <input type="text" inputMode="numeric" className={`w-full rounded-lg p-2 text-center font-black text-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm ${set.isCompleted ? 'bg-transparent text-green-700 dark:text-green-400' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-600'}`} value={set.reps} onChange={(e) => updateSet(eIndex, sIndex, 'reps', e.target.value.replace(/[^0-9]/g, ''))} readOnly={set.isCompleted} placeholder="-" />
+                return (
+                  <div key={sIndex} className="flex flex-col">
+                    <div className={`flex gap-2 items-center p-2 rounded-xl relative transition-all duration-300 ${set.isCompleted ? 'bg-green-50/50 dark:bg-green-900/10 border border-green-200 dark:border-green-800/50' : isWarmup ? 'bg-orange-50/50 dark:bg-orange-900/10 border border-orange-100 dark:border-orange-800/30' : isDrop ? 'bg-purple-50/50 dark:bg-purple-900/10 border border-purple-100 dark:border-purple-800/30' : 'bg-gray-50 dark:bg-gray-700/30 border border-gray-100 dark:border-gray-700/50'}`}>
+                      
+                      <button onClick={() => setActiveSetMenu(isActiveMenu ? null : {eIndex, sIndex})} className={`w-7 h-7 flex items-center justify-center rounded-lg font-black text-xs transition-colors shadow-sm ${isWarmup ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400' : isDrop ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400' : 'bg-white dark:bg-gray-600 text-gray-500 dark:text-gray-300 border border-gray-200 dark:border-gray-500'}`}>
+                        {isWarmup ? 'W' : isDrop ? 'D' : sIndex + 1}
+                      </button>
+
+                      <div className="flex-1 flex flex-col justify-center gap-1">
+                        <div className="flex gap-2">
+                          <input type="text" inputMode="decimal" className={`w-full rounded-lg p-1.5 text-center font-black text-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm ${set.isCompleted ? 'bg-transparent text-green-700 dark:text-green-400' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-600'}`} value={set.weight} onChange={(e) => updateSet(eIndex, sIndex, 'weight', e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.'))} readOnly={set.isCompleted} placeholder="-" />
+                          <input type="text" inputMode="numeric" className={`w-full rounded-lg p-1.5 text-center font-black text-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm ${set.isCompleted ? 'bg-transparent text-green-700 dark:text-green-400' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-600'}`} value={set.reps} onChange={(e) => updateSet(eIndex, sIndex, 'reps', e.target.value.replace(/[^0-9]/g, ''))} readOnly={set.isCompleted} placeholder="-" />
+                        </div>
+                        {(prevW !== "-" || prevR !== "-") && (
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-bold text-center tracking-wide">
+                            Ostatnio: {prevW} kg × {prevR}
+                          </span>
+                        )}
+                      </div>
+
+                      <button onClick={() => toggleSetComplete(eIndex, sIndex)} className={`w-12 h-10 rounded-xl flex items-center justify-center font-bold text-xl transition-all duration-300 shadow-sm ${set.isCompleted ? 'bg-green-500 text-white shadow-green-500/40' : 'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-500'}`}>
+                        ✓
+                      </button>
+
+                      <AnimatePresence>
+                        {isActiveMenu && !set.isCompleted && (
+                          <motion.div initial={{ opacity: 0, scale: 0.9, x: -10 }} animate={{ opacity: 1, scale: 1, x: 0 }} exit={{ opacity: 0, scale: 0.9, x: -10 }} className="absolute left-10 top-10 z-20 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 p-2 flex gap-1 flex-wrap w-[220px]">
+                            <button onClick={() => { updateSet(eIndex, sIndex, 'type', 'warm-up'); setActiveSetMenu(null); }} className="px-3 py-2 text-xs font-bold bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 rounded-xl flex-1 text-center">Rozgrzewka</button>
+                            <button onClick={() => { updateSet(eIndex, sIndex, 'type', 'normal'); setActiveSetMenu(null); }} className="px-3 py-2 text-xs font-bold bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded-xl flex-1 text-center">Zwykła</button>
+                            <button onClick={() => { updateSet(eIndex, sIndex, 'type', 'drop'); setActiveSetMenu(null); }} className="px-3 py-2 text-xs font-bold bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 rounded-xl flex-1 text-center">Dropset</button>
+                            <div className="w-full flex gap-1 mt-1 pt-1 border-t border-gray-100 dark:border-gray-700">
+                              <button onClick={() => moveSet(eIndex, sIndex, -1)} disabled={sIndex === 0} className="px-3 py-2 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-xl flex-1 text-center disabled:opacity-30">↑</button>
+                              <button onClick={() => moveSet(eIndex, sIndex, 1)} disabled={sIndex === exercise.sets.length - 1} className="px-3 py-2 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-xl flex-1 text-center disabled:opacity-30">↓</button>
+                              <button onClick={() => deleteSet(eIndex, sIndex)} className="px-3 py-2 bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded-xl flex-1 text-center font-bold">Usuń</button>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
 
-                    <button onClick={() => toggleSetComplete(eIndex, sIndex)} className={`w-12 h-10 rounded-xl flex items-center justify-center font-bold text-xl transition-all duration-300 shadow-sm ${set.isCompleted ? 'bg-green-500 text-white shadow-green-500/40' : 'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-500'}`}>
-                      ✓
-                    </button>
-
+                    {/* TIMER RENDEROWANY BEZPOŚREDNIO POD AKTYWNĄ SERIĄ */}
                     <AnimatePresence>
-                      {isActiveMenu && !set.isCompleted && (
-                        <motion.div initial={{ opacity: 0, scale: 0.9, x: -10 }} animate={{ opacity: 1, scale: 1, x: 0 }} exit={{ opacity: 0, scale: 0.9, x: -10 }} className="absolute left-10 top-10 z-20 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 p-2 flex gap-1 flex-wrap w-[220px]">
-                          <button onClick={() => { updateSet(eIndex, sIndex, 'type', 'warm-up'); setActiveSetMenu(null); }} className="px-3 py-2 text-xs font-bold bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 rounded-xl flex-1 text-center">Rozgrzewka</button>
-                          <button onClick={() => { updateSet(eIndex, sIndex, 'type', 'normal'); setActiveSetMenu(null); }} className="px-3 py-2 text-xs font-bold bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded-xl flex-1 text-center">Zwykła</button>
-                          <button onClick={() => { updateSet(eIndex, sIndex, 'type', 'drop'); setActiveSetMenu(null); }} className="px-3 py-2 text-xs font-bold bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 rounded-xl flex-1 text-center">Dropset</button>
-                          <div className="w-full flex gap-1 mt-1 pt-1 border-t border-gray-100 dark:border-gray-700">
-                            <button onClick={() => moveSet(eIndex, sIndex, -1)} disabled={sIndex === 0} className="px-3 py-2 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-xl flex-1 text-center disabled:opacity-30">↑</button>
-                            <button onClick={() => moveSet(eIndex, sIndex, 1)} disabled={sIndex === exercise.sets.length - 1} className="px-3 py-2 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-xl flex-1 text-center disabled:opacity-30">↓</button>
-                            <button onClick={() => deleteSet(eIndex, sIndex)} className="px-3 py-2 bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded-xl flex-1 text-center font-bold">Usuń</button>
-                          </div>
+                      {timerActive && timerSource?.exercise === eIndex && timerSource?.set === sIndex && (
+                        <motion.div id="inline-timer" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mt-2 mb-2 px-1">
+                          <RestTimer timeLeft={timeLeft} formatTime={formatTime} adjustTimer={adjustTimer} skipTimer={() => { setTimerActive(false); setTimerTarget(null); setTimerSource(null); }} />
                         </motion.div>
                       )}
                     </AnimatePresence>
+
                   </div>
                 )
               })}
