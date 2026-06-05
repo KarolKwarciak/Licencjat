@@ -4,15 +4,16 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { EXERCISES_DB } from './data/exercises'
 import { supabase } from './supabaseClient'
 
-// POTĘŻNY SYSTEMOWY BUDZIK OD CAPACITORA
+// POTĘŻNE MODUŁY CAPACITORA (Budzik i Udostępnianie)
 import { LocalNotifications } from '@capacitor/local-notifications'
+import { Share } from '@capacitor/share'
 
 // Importujemy nasze wydzielone komponenty
 import BottomNav from './components/BottomNav'
 import RestTimer from './components/RestTimer'
 import Auth from './components/Auth'
 
-// Importujemy widoki z nowego folderu 'views'
+// Importujemy widoki
 import HistoryTabRaw from './views/HistoryTab'
 import ExercisesTabRaw from './views/ExercisesTab'
 import WorkoutTab from './views/WorkoutTab' 
@@ -49,7 +50,7 @@ function App() {
     setConfirmModal({ message, onConfirm, confirmText, cancelText, onCancel });
   }
 
-  // --- STANY APLIKACJI Z AUTO-SAVEM W LOCALSTORAGE ---
+  // --- STANY APLIKACJI ---
   const [isWorkoutActive, setIsWorkoutActive] = useState(() => JSON.parse(localStorage.getItem('fitApp_isWorkoutActive')) || false)
   const [currentWorkout, setCurrentWorkout] = useState(() => JSON.parse(localStorage.getItem('fitApp_currentWorkout')) || [])
   const [workoutStartTime, setWorkoutStartTime] = useState(() => JSON.parse(localStorage.getItem('fitApp_workoutStartTime')) || null)
@@ -63,7 +64,6 @@ function App() {
   const [defaultRestTime, setDefaultRestTime] = useState(180) 
   const [isInlineTimerVisible, setIsInlineTimerVisible] = useState(true)
 
-  // EFEKT ZAPISUJĄCY TRENING W TLE
   useEffect(() => {
     localStorage.setItem('fitApp_isWorkoutActive', JSON.stringify(isWorkoutActive));
     localStorage.setItem('fitApp_currentWorkout', JSON.stringify(currentWorkout));
@@ -93,6 +93,7 @@ function App() {
 
   const [customTemplates, setCustomTemplates] = useState([])
   const [isCreatingTemplate, setIsCreatingTemplate] = useState(false)
+  const [editingTemplateId, setEditingTemplateId] = useState(null) // <--- NOWY STAN DO EDYCJI SZABLONU
   const [newTemplateName, setNewTemplateName] = useState('')
   const [newTemplateExercises, setNewTemplateExercises] = useState([])
 
@@ -113,10 +114,30 @@ function App() {
 
   const allTemplates = [...customTemplates]
 
+  // --- LOGIKA SESJI Z OBEJŚCIEM OFFLINE ---
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session))
-    return () => subscription.unsubscribe()
+    const checkSession = async () => {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      if (currentSession) {
+        setSession(currentSession);
+      } else if (!navigator.onLine) {
+        const localKeys = Object.keys(localStorage).filter(k => k.startsWith('fitAppHistory_'));
+        if (localKeys.length > 0) {
+          const fakeUid = localKeys[0].replace('fitAppHistory_', '');
+          setSession({ user: { id: fakeUid, user_metadata: { username: 'Tryb Offline' } } });
+          showToast("Tryb offline aktywny. Trening zostanie zsynchronizowany później 📴", "info");
+        }
+      }
+    };
+    
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      if (newSession) setSession(newSession);
+    });
+
+    return () => subscription.unsubscribe();
   }, [])
 
   useEffect(() => {
@@ -137,6 +158,18 @@ function App() {
     const uid = session.user.id;
 
     const fetchCloudData = async () => {
+      if (!navigator.onLine) {
+        const savedHistory = localStorage.getItem(`fitAppHistory_${uid}`);
+        if (savedHistory) setWorkoutHistory(JSON.parse(savedHistory));
+        const savedTemplates = localStorage.getItem(`fitAppTemplates_${uid}`);
+        if (savedTemplates) setCustomTemplates(JSON.parse(savedTemplates));
+        const savedMeasurements = localStorage.getItem(`fitAppMeasurements_${uid}`);
+        if (savedMeasurements) setMeasurements(JSON.parse(savedMeasurements));
+        const savedHeight = localStorage.getItem(`fitAppHeight_${uid}`);
+        if (savedHeight) setUserHeight(savedHeight);
+        return;
+      }
+
       setLoadingData(true);
       try {
         const localHistoryStr = localStorage.getItem(`fitAppHistory_${uid}`);
@@ -185,12 +218,6 @@ function App() {
         console.error("Błąd sieci:", err);
         const savedHistory = localStorage.getItem(`fitAppHistory_${uid}`)
         if (savedHistory) setWorkoutHistory(JSON.parse(savedHistory))
-        const savedTemplates = localStorage.getItem(`fitAppTemplates_${uid}`)
-        if (savedTemplates) setCustomTemplates(JSON.parse(savedTemplates))
-        const savedMeasurements = localStorage.getItem(`fitAppMeasurements_${uid}`)
-        if (savedMeasurements) setMeasurements(JSON.parse(savedMeasurements))
-        const savedHeight = localStorage.getItem(`fitAppHeight_${uid}`)
-        if (savedHeight) setUserHeight(savedHeight)
       } finally {
         setLoadingData(false);
       }
@@ -203,7 +230,6 @@ function App() {
     if (savedTheme === 'dark') { setIsDarkMode(true); document.documentElement.classList.add('dark'); }
   }, [])
 
-  // --- STOPER OPARTY O TIMESTAMPY (Z KONTROLĄ SYSTEMU OPERACYJNEGO) ---
   useEffect(() => {
     let interval = null;
     if (timerActive && timerTarget) {
@@ -228,14 +254,12 @@ function App() {
     return () => clearInterval(interval)
   }, [isWorkoutActive, workoutStartTime])
 
-  // --- PANCERNY MODYFIKATOR CZASU (+/- 30s) SYNCHRONIZOWANY Z SYSTEMEM TELEFONU ---
   const adjustTimer = async (amountInSeconds) => {
     if (timerTarget) {
       const newTarget = timerTarget + amountInSeconds * 1000;
       setTimerTarget(newTarget);
       setTimeLeft(prev => prev + amountInSeconds);
 
-      // Aktualizujemy systemowy alarm w telefonie na nowy czas
       try {
         await LocalNotifications.cancel({ notifications: [{ id: 777 }] });
         if (newTarget > Date.now()) {
@@ -296,15 +320,20 @@ function App() {
       const newMeas = { user_id: uid, date: new Date().toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }), ...measForm };
       const updated = [newMeas, ...measurements];
       setMeasurements(updated);
+      
       if (uid) {
         localStorage.setItem(`fitAppMeasurements_${uid}`, JSON.stringify(updated));
-        const { error } = await supabase.from('measurements').insert(newMeas);
-        if (error) showToast("Błąd zapisu w chmurze: " + error.message, "error");
-        else showToast("Pomiary zapisane w chmurze! 📈", "success");
+        if (!navigator.onLine) {
+          showToast("Pomiary zapisane offline! Zsynchronizują się później 📈", "info");
+        } else {
+          const { error } = await supabase.from('measurements').insert(newMeas);
+          if (error) throw error;
+          showToast("Pomiary zapisane w chmurze! 📈", "success");
+        }
       }
       setMeasForm({ weight: '', waist: '', biceps: '' }); setShowMeasurementModal(false);
     } catch(e) {
-      console.error(e);
+      showToast("Zapisano offline. Zsynchronizuje się automatycznie! 📴", "info");
     } finally {
       setIsSaving(false);
     }
@@ -314,17 +343,7 @@ function App() {
     setUserHeight(val); const uid = session?.user?.id;
     if (uid) {
       localStorage.setItem(`fitAppHeight_${uid}`, val);
-      await supabase.from('profiles').upsert({ id: uid, height: val });
-    }
-  }
-
-  const handleSaveTemplateCloud = async (newTemplate) => {
-    const updated = [...customTemplates, newTemplate]; setCustomTemplates(updated); const uid = session?.user?.id;
-    if (uid) {
-      localStorage.setItem(`fitAppTemplates_${uid}`, JSON.stringify(updated));
-      const { error } = await supabase.from('templates').insert(newTemplate);
-      if (error) showToast("Błąd chmury: " + error.message, "error");
-      else showToast("Szablon planu zapisany! 📋", "success");
+      if (navigator.onLine) await supabase.from('profiles').upsert({ id: uid, height: val });
     }
   }
 
@@ -335,7 +354,6 @@ function App() {
   }
 
   const startWorkout = () => {
-    // Żądamy zgody na systemowe notyfikacje w telefonie przy starcie
     try { LocalNotifications.requestPermissions(); } catch(e){}
     setEditingWorkoutId(null); setIsWorkoutActive(true); setTimerSource(null); 
     setTimerTarget(null); setTimerActive(false); setWorkoutStartTime(Date.now()); setElapsedTime(0);
@@ -460,11 +478,15 @@ function App() {
     if (uid && finalWorkoutObj) {
       setIsSaving(true);
       try {
-        const { error } = await supabase.from('workouts').upsert(finalWorkoutObj);
-        if (error) showToast(`Zapisano lokalnie. Błąd chmury: ${error.message}`, "error");
-        else showToast("Trening potężnie zapisany w chmurze! 🚀", "success");
+        if (!navigator.onLine) {
+          showToast("Trening zapisany offline! Zsynchronizuje się automatycznie 📴", "info");
+        } else {
+          const { error } = await supabase.from('workouts').upsert(finalWorkoutObj);
+          if (error) throw error;
+          showToast("Trening potężnie zapisany w chmurze! 🚀", "success");
+        }
       } catch(e) {
-        showToast("Brak internetu. Trening zapisany w pamięci (zsynchronizuje się automatycznie!) 📴", "info");
+        showToast("Brak internetu. Zapisano lokalnie 📴", "info");
       } finally {
         setIsSaving(false);
       }
@@ -523,11 +545,64 @@ function App() {
     setNewExName(''); setNewExDescription(''); setShowCreateExercise(false); showToast("Własne ćwiczenie utworzone!", "success");
   }
 
-  const handleSaveTemplate = () => {
+  // --- LOGIKA ZAPISU I EDYCJI SZABLONU ---
+  const handleSaveTemplate = async () => {
     if (!newTemplateName.trim()) return showToast('Wpisz nazwę szablonu!', 'error');
     if (newTemplateExercises.length === 0) return showToast('Dodaj przynajmniej jedno ćwiczenie!', 'error');
-    const newTemplate = { id: 'custom-' + Date.now(), user_id: session?.user?.id, name: newTemplateName, exercises: newTemplateExercises }
-    handleSaveTemplateCloud(newTemplate); setNewTemplateName(''); setNewTemplateExercises([]); setIsCreatingTemplate(false);
+    
+    setIsSaving(true);
+    try {
+      const uid = session?.user?.id;
+      let updatedTemplates;
+
+      if (editingTemplateId) {
+        const updatedTemplate = { id: editingTemplateId, user_id: uid, name: newTemplateName, exercises: newTemplateExercises };
+        updatedTemplates = customTemplates.map(t => t.id === editingTemplateId ? updatedTemplate : t);
+        setCustomTemplates(updatedTemplates);
+
+        if (uid) {
+          localStorage.setItem(`fitAppTemplates_${uid}`, JSON.stringify(updatedTemplates));
+          if (!navigator.onLine) {
+            showToast("Szablon zaktualizowany offline! 📋", "info");
+          } else {
+            const { error } = await supabase.from('templates').update({ name: newTemplateName, exercises: newTemplateExercises }).eq('id', editingTemplateId);
+            if (error) throw error;
+            showToast("Szablon zaktualizowany! 📋", "success");
+          }
+        }
+      } else {
+        const newTemplate = { id: 'custom-' + Date.now(), user_id: uid, name: newTemplateName, exercises: newTemplateExercises };
+        updatedTemplates = [...customTemplates, newTemplate];
+        setCustomTemplates(updatedTemplates);
+        
+        if (uid) {
+          localStorage.setItem(`fitAppTemplates_${uid}`, JSON.stringify(updatedTemplates));
+          if (!navigator.onLine) {
+            showToast("Szablon zapisany offline! 📋", "info");
+          } else {
+            const { error } = await supabase.from('templates').insert(newTemplate);
+            if (error) throw error;
+            showToast("Szablon planu zapisany! 📋", "success");
+          }
+        }
+      }
+      
+      setNewTemplateName(''); 
+      setNewTemplateExercises([]); 
+      setIsCreatingTemplate(false);
+      setEditingTemplateId(null);
+    } catch (err) {
+      showToast("Wystąpił błąd zapisu.", "error");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const handleEditTemplate = (template) => {
+    setEditingTemplateId(template.id);
+    setNewTemplateName(template.name);
+    setNewTemplateExercises(JSON.parse(JSON.stringify(template.exercises)));
+    setIsCreatingTemplate(true);
   }
 
   const handleDeleteTemplate = async (e, templateId) => {
@@ -536,8 +611,8 @@ function App() {
       const updated = customTemplates.filter(t => t.id !== templateId); setCustomTemplates(updated); const uid = session?.user?.id;
       if (uid) {
         localStorage.setItem(`fitAppTemplates_${uid}`, JSON.stringify(updated));
-        const { error } = await supabase.from('templates').delete().eq('id', templateId);
-        if(error) showToast(`Błąd chmury: ${error.message}`, "error"); else showToast("Szablon usunięty.", "info");
+        if (navigator.onLine) await supabase.from('templates').delete().eq('id', templateId);
+        showToast("Szablon usunięty.", "info");
       }
     });
   }
@@ -552,8 +627,8 @@ function App() {
       const updated = workoutHistory.filter(w => w.id !== workoutId); setWorkoutHistory(updated); const uid = session?.user?.id;
       if (uid) {
         localStorage.setItem(`fitAppHistory_${uid}`, JSON.stringify(updated));
-        const { error } = await supabase.from('workouts').delete().eq('id', workoutId);
-        if(error) showToast(`Błąd chmury: ${error.message}`, "error"); else showToast("Trening usunięty z historii.", "info");
+        if (navigator.onLine) await supabase.from('workouts').delete().eq('id', workoutId);
+        showToast("Trening usunięty z historii.", "info");
       }
     });
   }
@@ -566,7 +641,6 @@ function App() {
     const newWorkout = [...currentWorkout]; newWorkout[eIndex].sets[sIndex][field] = value; setCurrentWorkout(newWorkout);
   }
 
-  // --- ODPALANIE SYSTEMOWEGO LICZNIKA PRZY ODZNACZANIU SERII ---
   const toggleSetComplete = async (eIndex, sIndex) => {
     const newWorkout = [...currentWorkout]; const isNowCompleted = !newWorkout[eIndex].sets[sIndex].isCompleted;
     newWorkout[eIndex].sets[sIndex].isCompleted = isNowCompleted; setCurrentWorkout(newWorkout);
@@ -582,7 +656,6 @@ function App() {
       setTimerActive(true); 
       setTimerSource({ exercise: eIndex, set: sIndex }); 
 
-      // REJESTRACJA SYSTEMOWEGO POWIADOMIENIA W TELEFONIE (ZABLOKOWANY EKRAN)
       try {
         await LocalNotifications.cancel({ notifications: [{ id: 777 }] });
         await LocalNotifications.schedule({
@@ -789,14 +862,18 @@ function App() {
     markerPos = Math.min(100, Math.max(0, ((parseFloat(bmi) - 15) / 20) * 100));
   }
 
-  const shareWorkout = () => {
-    if (navigator.share && showSummaryModal) {
-      navigator.share({
-        title: 'Mój dzisiejszy trening 💪',
-        text: `Właśnie ukończyłem świetny trening w FitApp!\n⏱ Czas: ${formatTime(showSummaryModal.duration)}\n🏋️‍♂️ Tonaż: ${showSummaryModal.volume} kg\nLecimy po więcej! 🔥`,
-      }).catch(console.error);
-    } else {
-      showToast("Twoja przeglądarka nie wspiera tej funkcji, ale zrób screena!", "info");
+  const shareWorkout = async () => {
+    if (showSummaryModal) {
+      const shareText = `Właśnie ukończyłem świetny trening w FitApp!\n⏱ Czas: ${formatTime(showSummaryModal.duration)}\n🏋️‍♂️ Tonaż: ${showSummaryModal.volume} kg\nLecimy po więcej! 🔥`;
+      try {
+        await Share.share({
+          title: 'Mój dzisiejszy trening 💪',
+          text: shareText,
+          dialogTitle: 'Pochwal się swoim treningiem'
+        });
+      } catch (e) {
+        showToast("Nie udało się otworzyć menu udostępniania.", "error");
+      }
     }
   }
 
@@ -805,6 +882,8 @@ function App() {
   const shouldShowSmartWidget = isWorkoutActive && !showExerciseModal && !showSummaryModal && !showMeasurementModal && !showMeasurementHistory && (
     (activeTab !== 'workout') || (activeTab === 'workout' && timerActive && !isInlineTimerVisible)
   );
+
+  const chartWidth = Math.min(window.innerWidth - 72, 380);
 
   if (!session) return <Auth />
 
@@ -870,7 +949,8 @@ function App() {
             {activeTab === 'exercises' && (selectedExerciseDetail ? 'Szczegóły' : 'Baza ćwiczeń')}
             {activeTab === 'workout' && !isWorkoutActive && !isCreatingTemplate && 'Trening'}
             {activeTab === 'workout' && isWorkoutActive && (editingWorkoutId ? 'Edycja' : 'Trwa trening')}
-            {activeTab === 'workout' && isCreatingTemplate && 'Nowy szablon'}
+            {/* ZMIENIONY TYTUŁ PRZY EDYCJI SZABLONU */}
+            {activeTab === 'workout' && isCreatingTemplate && (editingTemplateId ? 'Edycja szablonu' : 'Nowy szablon')}
             {activeTab === 'calendar' && 'Twój Rok'}
             {activeTab === 'profile' && 'Profil'}
             {loadingData && <span className="text-sm animate-spin">⏳</span>}
@@ -932,9 +1012,6 @@ function App() {
                     <div key={idx} className="flex justify-between items-center border-b border-gray-200/50 dark:border-gray-600/50 pb-2.5 pt-1 last:border-0 last:pb-0">
                       <span className="text-sm font-bold text-gray-800 dark:text-gray-200 truncate pr-2 flex-1">{ex.name}</span>
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-[11px] font-black text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800 px-2 py-1 rounded-md shadow-sm border border-gray-100 dark:border-gray-700">
-                          {ex.bestSetString}
-                        </span>
                         {ex.isPR && (
                           <motion.span 
                             initial={{ scale: 0, rotate: -20 }}
@@ -946,6 +1023,9 @@ function App() {
                             🏆
                           </motion.span>
                         )}
+                        <span className="text-[11px] font-black text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800 px-2 py-1 rounded-md shadow-sm border border-gray-100 dark:border-gray-700">
+                          {ex.bestSetString}
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -1058,6 +1138,8 @@ function App() {
             setExerciseSubTab={setExerciseSubTab}
             setActiveTab={setActiveTab}
             adjustTimer={adjustTimer}
+            handleEditTemplate={handleEditTemplate} // <--- PRZEKAZUJEMY FUNKCJĘ EDYCJI
+            setEditingTemplateId={setEditingTemplateId} // <--- PRZEKAZUJEMY FUNKCJĘ CZYSZCZENIA EDYCJI
           />
         )}
 
@@ -1100,6 +1182,96 @@ function App() {
           />
         )}
       </main>
+
+      <AnimatePresence>
+        {showMeasurementHistory && (
+          <motion.div 
+            initial={{ opacity: 0, y: '100%' }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="absolute inset-0 z-[110] bg-gray-50 dark:bg-gray-900 flex flex-col transition-colors duration-300"
+          >
+            <header className="sticky top-0 z-40 bg-white dark:bg-gray-800 shadow-md px-4 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center shrink-0">
+              <h2 className="text-xl font-black dark:text-white tracking-tight">Historia pomiarów</h2>
+              <button onClick={() => setShowMeasurementHistory(false)} className="text-blue-500 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg text-sm cursor-pointer">Zamknij</button>
+            </header>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-5 pb-10">
+              {measurements.length === 0 ? (
+                <div className="text-center text-sm text-gray-400 dark:text-gray-500 py-12 font-medium">
+                  Brak zapisanych pomiarów.<br/>Dodaj swój pierwszy pomiar w zakładce Profil! 📈
+                </div>
+              ) : (
+                ['weight', 'waist', 'biceps'].map(metric => {
+                  const label = metric === 'weight' ? 'Waga (kg)' : metric === 'waist' ? 'Pas (cm)' : 'Biceps (cm)';
+                  const color = metric === 'weight' ? '#2563eb' : metric === 'waist' ? '#16a34a' : '#dc2626';
+                  
+                  const mData = [...measurements]
+                    .reverse()
+                    .filter(m => m && m[metric] !== undefined && m[metric] !== null && m[metric] !== '')
+                    .map((m, index) => ({ 
+                      id: index, 
+                      date: m.date ? String(m.date).slice(0, 5) : '', 
+                      fullDate: m.date ? String(m.date) : '', 
+                      value: parseFloat(String(m[metric]).replace(',','.')) 
+                    }))
+                    .filter(d => !isNaN(d.value));
+
+                  if (mData.length === 0) return null;
+
+                  return (
+                    <div key={metric} className="bg-white dark:bg-gray-800 p-5 rounded-3xl shadow-lg border border-gray-200 dark:border-gray-700">
+                      <h3 className="font-extrabold text-gray-800 dark:text-gray-100 mb-5 text-sm uppercase tracking-widest">{label}</h3>
+                      <div className="h-48 w-full flex justify-center">
+                        <AreaChart width={chartWidth} height={192} data={mData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                          <defs><linearGradient id={`color${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={color} stopOpacity={0.5}/><stop offset="95%" stopColor={color} stopOpacity={0}/></linearGradient></defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#374151' : '#f3f4f6'} />
+                          <XAxis dataKey="id" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#9ca3af', fontWeight: 'bold' }} tickFormatter={(id) => mData.find(d => d.id === id)?.date || ''} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#9ca3af', fontWeight: 'bold' }} width={30} domain={['dataMin - 2', 'dataMax + 2']} />
+                          <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: isDarkMode ? '#1f2937' : '#ffffff', color: isDarkMode ? '#f3f4f6' : '#374151', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)' }} labelStyle={{ fontWeight: '900', marginBottom: '4px', textTransform: 'uppercase', fontSize: '10px', color: '#9ca3af', letterSpacing: '0.05em' }} labelFormatter={(id) => mData.find(d => d.id === id)?.fullDate || ''} formatter={(value) => [`${value}`, label.split(' ')[0]]} />
+                          <Area type="monotone" dataKey="value" stroke={color} strokeWidth={4} fillOpacity={1} fill={`url(#color${metric})`} dot={{ r: 4, fill: color, stroke: isDarkMode ? '#1f2937' : '#fff', strokeWidth: 2 }} activeDot={{ r: 6, fill: color, stroke: isDarkMode ? '#1f2937' : '#fff', strokeWidth: 2 }} />
+                        </AreaChart>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showMeasurementModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] bg-gray-50/90 dark:bg-gray-900/90 backdrop-blur-md flex flex-col justify-center items-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', bounce: 0.5 }}
+              className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 w-full max-w-sm flex flex-col gap-5"
+            >
+              <div className="flex justify-between items-center mb-1 border-b border-gray-100 dark:border-gray-700 pb-3">
+                <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">Nowy pomiar</h2>
+                <button onClick={() => setShowMeasurementModal(false)} className="text-gray-400 hover:text-red-500 font-bold text-xl px-2 cursor-pointer">✕</button>
+              </div>
+              <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Waga (kg)</label><input type="text" inputMode="decimal" value={measForm.weight} onChange={e => setMeasForm({...measForm, weight: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 82.5" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
+              <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Obwód pasa (cm)</label><input type="text" inputMode="decimal" value={measForm.waist} onChange={e => setMeasForm({...measForm, waist: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 86" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
+              <div><label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest block mb-1.5">Obwód bicepsa (cm)</label><input type="text" inputMode="decimal" value={measForm.biceps} onChange={e => setMeasForm({...measForm, biceps: e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')})} placeholder="np. 38.5" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl p-3.5 outline-none focus:ring-2 focus:ring-blue-500 font-bold transition-all shadow-inner" /></div>
+              
+              <button disabled={isSaving} onClick={handleSaveMeasurement} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/30 active:scale-95 transition-all mt-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                {isSaving ? 'Zapisywanie... ⏳' : 'Zapisz pomiar'}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {shouldShowSmartWidget && (
