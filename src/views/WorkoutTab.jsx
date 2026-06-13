@@ -346,3 +346,22 @@ const WorkoutTabRaw = ({
 };
 
 export default WorkoutTabRaw;
+
+
+<AnimatePresence>
+    {timerActive && timerSource?.exercise === eIndex && timerSource?.set === sIndex && (
+      <motion.div 
+        id="inline-timer" 
+        initial={{ opacity: 0, height: 0 }} 
+        animate={{ opacity: 1, height: 'auto' }} 
+        exit={{ opacity: 0, height: 0 }} 
+        className="mt-2 mb-2 px-1"
+      >
+        <RestTimer 
+          timeLeft={timeLeft} 
+          formatTime={formatTime} 
+          adjustTimer={adjustTimer} 
+        />
+      </motion.div>
+    )}
+  </AnimatePresence>
